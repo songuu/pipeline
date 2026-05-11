@@ -1,0 +1,133 @@
+import { Body, Controller, Get, Inject, Param, Post } from "@nestjs/common";
+import {
+  toPipelineRunInstance,
+  type ApiResponse,
+  type PipelineRun,
+  type PipelineRunInstance,
+} from "@deploy-management/shared";
+import { ok } from "../common/api-response";
+import { ZodValidationPipe } from "../common/zod-validation.pipe";
+import { PipelinesService } from "../pipelines/pipelines.service";
+import { RunsService } from "./runs.service";
+import {
+  approvalDecisionParamSchema,
+  approvalDecisionSchema,
+  startPipelineRunSchema,
+  triggerRunSchema,
+  type ApprovalDecisionDto,
+  type ApprovalDecisionParam,
+  type StartPipelineRunDto,
+  type TriggerRunDto,
+} from "./dto/trigger-run.dto";
+
+@Controller()
+export class RunsController {
+  constructor(
+    @Inject(RunsService) private readonly runs: RunsService,
+    @Inject(PipelinesService) private readonly pipelines: PipelinesService,
+  ) {}
+
+  @Get("api/runs")
+  legacyList(): PipelineRun[] {
+    return this.runs.list();
+  }
+
+  @Get("api/runs/:runId")
+  legacyGet(@Param("runId") runId: string): PipelineRun {
+    return this.runs.get(runId);
+  }
+
+  @Get("api/runs/:runId/logs")
+  legacyLogs(@Param("runId") runId: string): string[] {
+    return this.runs.getLogs(runId);
+  }
+
+  @Post("api/pipelines/:pipelineId/trigger")
+  legacyTrigger(
+    @Param("pipelineId") pipelineId: string,
+    @Body(new ZodValidationPipe(triggerRunSchema)) body: TriggerRunDto,
+  ): Promise<PipelineRun> {
+    return this.runs.trigger(pipelineId, body);
+  }
+
+  @Post("api/runs/:runId/cancel")
+  legacyCancel(@Param("runId") runId: string): Promise<PipelineRun> {
+    return this.runs.cancel(runId);
+  }
+
+  @Post("api/runs/:runId/promote")
+  legacyPromote(@Param("runId") runId: string): Promise<PipelineRun> {
+    return this.runs.promote(runId);
+  }
+
+  @Post("api/approvals/:approvalId/:decision")
+  legacyDecideApproval(
+    @Param("approvalId") approvalId: string,
+    @Param("decision", new ZodValidationPipe(approvalDecisionParamSchema)) decision: ApprovalDecisionParam,
+    @Body(new ZodValidationPipe(approvalDecisionSchema)) body: ApprovalDecisionDto,
+  ): Promise<{ approval: unknown; run: PipelineRun }> {
+    return this.runs.decideApproval(approvalId, decision, body.actor ?? "RO");
+  }
+
+  // -------------------------------------------------------------------------
+  // Yunxiao 风格 OpenAPI
+  // -------------------------------------------------------------------------
+
+  @Get("oapi/v1/flow/pipelineRuns")
+  list(): ApiResponse<PipelineRunInstance[]> {
+    const items = this.runs.list().map((run) => toPipelineRunInstance(run));
+    return ok(items, { total: items.length });
+  }
+
+  @Get("oapi/v1/flow/pipelineRuns/:pipelineRunId")
+  get(@Param("pipelineRunId") pipelineRunId: string): ApiResponse<PipelineRunInstance> {
+    const run = this.runs.get(pipelineRunId);
+    return ok(toPipelineRunInstance(run));
+  }
+
+  @Get("oapi/v1/flow/pipelines/:pipelineId/runs")
+  listForPipeline(@Param("pipelineId") pipelineId: string): ApiResponse<PipelineRunInstance[]> {
+    const items = this.runs
+      .list()
+      .filter((run) => run.pipelineId === pipelineId)
+      .map((run) => toPipelineRunInstance(run));
+    return ok(items, { total: items.length });
+  }
+
+  @Post("oapi/v1/flow/pipelines/:pipelineId/runs")
+  async startRun(
+    @Param("pipelineId") pipelineId: string,
+    @Body(new ZodValidationPipe(startPipelineRunSchema)) params: StartPipelineRunDto,
+  ): Promise<ApiResponse<PipelineRunInstance>> {
+    const pipeline = this.pipelines.get(pipelineId);
+    const trigger = this.runs.toTriggerRequest(pipeline, params, "openapi");
+    const run = await this.runs.trigger(pipelineId, trigger);
+    return ok(toPipelineRunInstance(run));
+  }
+
+  @Post("oapi/v1/flow/pipelineRuns/:pipelineRunId/cancel")
+  async cancelRun(
+    @Param("pipelineRunId") pipelineRunId: string,
+  ): Promise<ApiResponse<PipelineRunInstance>> {
+    const run = await this.runs.cancel(pipelineRunId);
+    return ok(toPipelineRunInstance(run));
+  }
+
+  @Post("oapi/v1/flow/pipelineRuns/:pipelineRunId/promote")
+  async promoteRun(
+    @Param("pipelineRunId") pipelineRunId: string,
+  ): Promise<ApiResponse<PipelineRunInstance>> {
+    const run = await this.runs.promote(pipelineRunId);
+    return ok(toPipelineRunInstance(run));
+  }
+
+  @Post("oapi/v1/flow/approvals/:approvalId/:decision")
+  async decideApproval(
+    @Param("approvalId") approvalId: string,
+    @Param("decision", new ZodValidationPipe(approvalDecisionParamSchema)) decision: ApprovalDecisionParam,
+    @Body(new ZodValidationPipe(approvalDecisionSchema)) body: ApprovalDecisionDto,
+  ): Promise<ApiResponse<PipelineRunInstance>> {
+    const { run } = await this.runs.decideApproval(approvalId, decision, body.actor ?? "RO");
+    return ok(toPipelineRunInstance(run));
+  }
+}

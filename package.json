@@ -1,0 +1,15 @@
+{
+  "name": "deploy-management",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev:api": "pnpm --filter @deploy-management/api dev",
+    "dev:web": "pnpm --filter @deploy-management/web dev",
+    "build": "pnpm -r build",
+    "check": "pnpm -r check"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}
