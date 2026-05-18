@@ -6,6 +6,6 @@ import { SEED_ENVIRONMENTS } from "../common/seed-data";
 @Injectable()
 export class EnvironmentsRepository extends InMemoryRepository<DeploymentEnvironment> {
   constructor() {
-    super(SEED_ENVIRONMENTS);
+    super(SEED_ENVIRONMENTS, "environments");
   }
 }

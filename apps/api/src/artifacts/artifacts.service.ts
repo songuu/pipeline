@@ -1,5 +1,6 @@
-import { Inject, Injectable } from "@nestjs/common";
-import type { Artifact, PipelineRun } from "@deploy-management/shared";
+import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { resolveImageArtifact, type Artifact, type LifecycleStageKey, type PipelineRun } from "@deploy-management/shared";
+import { createStableId } from "../common/ids";
 import { ArtifactsRepository } from "./artifacts.repository";
 
 @Injectable()
@@ -10,25 +11,125 @@ export class ArtifactsService {
     return this.repo.snapshot();
   }
 
+  get(id: string): Artifact {
+    const artifact = this.repo.snapshot().find((item) => item.id === id);
+    if (!artifact) {
+      throw new NotFoundException(`Artifact ${id} not found`);
+    }
+    return artifact;
+  }
+
+  async upsertFromStage(run: PipelineRun, stage: LifecycleStageKey): Promise<void> {
+    if (run.status === "failed" || run.status === "canceled") return;
+    if (run.executor?.backend !== "tekton" && run.executor?.backend !== "local-docker") return;
+    const artifact = buildStageArtifact(run, stage);
+    if (!artifact) return;
+    const existing = this.repo.snapshot().find(
+      (item) =>
+        item.runId === run.id &&
+        item.type === artifact.type &&
+        item.name === artifact.name &&
+        item.digest === artifact.digest,
+    );
+    if (existing) return;
+    await this.repo.prepend(artifact);
+  }
+
   async upsertFromRun(run: PipelineRun, type: Artifact["type"] = "image"): Promise<void> {
     if (run.status === "failed" || run.status === "canceled") return;
+    if (type === "image" && !realImageDigest(run)) return;
+    if (type === "provenance" && run.executor?.backend !== "tekton") return;
     const existing = this.repo.snapshot().find((item) => item.runId === run.id && item.type === type);
     if (existing) return;
+    const image = resolveImageArtifact(run.definitionSnapshot, run);
 
     const artifact: Artifact = {
-      id: `artifact-${this.repo.snapshot().length + 1}`,
+      id: createStableId("artifact"),
       runId: run.id,
       name:
         type === "provenance"
           ? `attestation/${run.applicationId}/${run.id}.intoto.jsonl`
-          : `registry.internal/${run.applicationId}`,
-      version: `${run.environment}-${run.id}`,
+          : image.imageRef,
+      version: type === "image" ? image.tag : `${run.environment}-${run.id}`,
       type,
-      digest: `sha256:${run.commit}${run.id.replace("run-", "")}`,
+      digest: type === "image" ? realImageDigest(run) ?? stageDigest(run, type) : stageDigest(run, type),
       size: type === "provenance" ? "18 KB" : "218 MB",
-      signed: run.status === "success" || type === "provenance",
+      signed: run.executor?.backend === "tekton" && (run.status === "success" || type === "provenance"),
       uploadedAt: new Date().toISOString(),
     };
     await this.repo.prepend(artifact);
   }
+}
+
+function buildStageArtifact(run: PipelineRun, stage: LifecycleStageKey): Artifact | undefined {
+  const image = resolveImageArtifact(run.definitionSnapshot, run);
+  const commit = run.commit.slice(0, 8);
+  const uploadedAt = new Date().toISOString();
+  const base = {
+    id: createStableId("artifact"),
+    runId: run.id,
+    version: `${run.environment}-${run.id}-${commit}`,
+    digest: stageDigest(run, stage),
+    uploadedAt,
+  };
+
+  if (stage === "source") {
+    return undefined;
+  }
+  if (stage === "test") {
+    return undefined;
+  }
+  if (stage === "build") {
+    const packagePath = typeof run.stages.find((item) => item.key === "build")?.metadata.packagePath === "string"
+      ? String(run.stages.find((item) => item.key === "build")?.metadata.packagePath)
+      : "";
+    const packageDigest = typeof run.stages.find((item) => item.key === "build")?.metadata.packageDigest === "string"
+      ? String(run.stages.find((item) => item.key === "build")?.metadata.packageDigest)
+      : "";
+    if (!packagePath || !packageDigest) return undefined;
+    return {
+      ...base,
+      name: packagePath,
+      type: "package",
+      digest: packageDigest,
+      size: "generated",
+      signed: false,
+    };
+  }
+  if (stage === "package") {
+    return undefined;
+  }
+  if (stage === "upload") {
+    const imageDigest = realImageDigest(run);
+    if (!imageDigest) return undefined;
+    return {
+      ...base,
+      name: image.imageRef,
+      version: image.tag,
+      type: "image",
+      digest: imageDigest,
+      size: "218 MB",
+      signed: run.executor?.backend === "tekton",
+    };
+  }
+  if (stage === "promote") {
+    return undefined;
+  }
+  return undefined;
+}
+
+function realImageDigest(run: PipelineRun): string | undefined {
+  const uploadStage = run.stages.find((stage) => stage.key === "upload");
+  const value = uploadStage?.metadata.imageDigest;
+  return typeof value === "string" && value.startsWith("sha256:") ? value : undefined;
+}
+
+function stageDigest(run: PipelineRun, stage: string): string {
+  const seed = `${run.commit}:${run.id}:${stage}:${run.refName}`;
+  const hex = Array.from(seed)
+    .map((char) => char.charCodeAt(0).toString(16).padStart(2, "0"))
+    .join("")
+    .slice(0, 64)
+    .padEnd(64, "0");
+  return `sha256:${hex}`;
 }

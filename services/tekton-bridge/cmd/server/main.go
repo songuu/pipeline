@@ -1,8 +1,8 @@
 // Tekton bridge entrypoint.
 //
-// Default backend: SimulatedBackend (no Kubernetes required).
-// To enable the real Tekton backend rebuild with: go build -tags tekton ./...
-// and set TEKTON_BRIDGE_BACKEND=tekton.
+// Default backend: SimulatedBackend without build tags, TektonBackend with
+// `go build -tags tekton ./...`. In tekton builds, set
+// TEKTON_BRIDGE_BACKEND=simulated only when explicitly running a fake local demo.
 package main
 
 import (

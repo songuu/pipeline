@@ -15,6 +15,7 @@ const audit_module_1 = require("../audit/audit.module");
 const code_repos_module_1 = require("../code-repos/code-repos.module");
 const environments_module_1 = require("../environments/environments.module");
 const pipelines_module_1 = require("../pipelines/pipelines.module");
+const releases_module_1 = require("../releases/releases.module");
 const runners_module_1 = require("../runners/runners.module");
 const runs_module_1 = require("../runs/runs.module");
 const snapshot_controller_1 = require("./snapshot.controller");
@@ -32,6 +33,7 @@ exports.SnapshotModule = SnapshotModule = __decorate([
             code_repos_module_1.CodeReposModule,
             environments_module_1.EnvironmentsModule,
             pipelines_module_1.PipelinesModule,
+            releases_module_1.ReleasesModule,
             runners_module_1.RunnersModule,
             runs_module_1.RunsModule,
         ],

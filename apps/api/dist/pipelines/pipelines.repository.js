@@ -15,7 +15,7 @@ const in_memory_repository_1 = require("../common/in-memory.repository");
 const seed_data_1 = require("../common/seed-data");
 let PipelinesRepository = class PipelinesRepository extends in_memory_repository_1.InMemoryRepository {
     constructor() {
-        super(seed_data_1.SEED_PIPELINES);
+        super(seed_data_1.SEED_PIPELINES, "pipelines");
     }
 };
 exports.PipelinesRepository = PipelinesRepository;

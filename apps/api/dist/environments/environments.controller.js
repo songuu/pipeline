@@ -28,6 +28,32 @@ let EnvironmentsController = class EnvironmentsController {
         const items = this.service.list();
         return (0, api_response_1.ok)(items, { total: items.length });
     }
+    legacyListTargets() {
+        return this.service.listDeploymentTargets();
+    }
+    legacyCreateTarget(body) {
+        return this.service.createDeploymentTarget(body);
+    }
+    legacyListLocks() {
+        return this.service.listEnvironmentLocks();
+    }
+    legacyPreflightTarget(targetId) {
+        return this.service.preflightDeploymentTarget(this.service.getDeploymentTarget(targetId));
+    }
+    listTargets() {
+        const items = this.service.listDeploymentTargets();
+        return (0, api_response_1.ok)(items, { total: items.length });
+    }
+    async createTarget(body) {
+        return (0, api_response_1.ok)(await this.service.createDeploymentTarget(body));
+    }
+    listLocks() {
+        const items = this.service.listEnvironmentLocks();
+        return (0, api_response_1.ok)(items, { total: items.length });
+    }
+    preflightTarget(targetId) {
+        return (0, api_response_1.ok)(this.service.preflightDeploymentTarget(this.service.getDeploymentTarget(targetId)));
+    }
 };
 exports.EnvironmentsController = EnvironmentsController;
 __decorate([
@@ -42,6 +68,58 @@ __decorate([
     __metadata("design:paramtypes", []),
     __metadata("design:returntype", Object)
 ], EnvironmentsController.prototype, "list", null);
+__decorate([
+    (0, common_1.Get)("api/deployment-targets"),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", Array)
+], EnvironmentsController.prototype, "legacyListTargets", null);
+__decorate([
+    (0, common_1.Post)("api/deployment-targets"),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
+], EnvironmentsController.prototype, "legacyCreateTarget", null);
+__decorate([
+    (0, common_1.Get)("api/environment-locks"),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", Array)
+], EnvironmentsController.prototype, "legacyListLocks", null);
+__decorate([
+    (0, common_1.Post)("api/deployment-targets/:targetId/preflight"),
+    __param(0, (0, common_1.Param)("targetId")),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", Object)
+], EnvironmentsController.prototype, "legacyPreflightTarget", null);
+__decorate([
+    (0, common_1.Get)("oapi/v1/flow/deployment-targets"),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", Object)
+], EnvironmentsController.prototype, "listTargets", null);
+__decorate([
+    (0, common_1.Post)("oapi/v1/flow/deployment-targets"),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
+], EnvironmentsController.prototype, "createTarget", null);
+__decorate([
+    (0, common_1.Get)("oapi/v1/flow/environment-locks"),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", Object)
+], EnvironmentsController.prototype, "listLocks", null);
+__decorate([
+    (0, common_1.Post)("oapi/v1/flow/deployment-targets/:targetId/preflight"),
+    __param(0, (0, common_1.Param)("targetId")),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", Object)
+], EnvironmentsController.prototype, "preflightTarget", null);
 exports.EnvironmentsController = EnvironmentsController = __decorate([
     (0, common_1.Controller)(),
     __param(0, (0, common_1.Inject)(environments_service_1.EnvironmentsService)),

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   CheckCircle2,
@@ -17,10 +17,13 @@ import {
 } from "lucide-react";
 import type { PipelineDefinition, PipelineRun, PlatformSnapshot, TektonPipelineBinding } from "@deploy-management/shared";
 
+export type PipelineListView = "list" | "all" | "groups" | "ungrouped";
+
 interface PipelineListProps {
   snapshot: PlatformSnapshot;
   query: string;
   onQueryChange: (value: string) => void;
+  sidebarView?: PipelineListView;
   selectedPipelineId?: string;
   onOpenTemplates: () => void;
   onRefresh: () => void;
@@ -36,6 +39,7 @@ export function PipelineList({
   snapshot,
   query,
   onQueryChange,
+  sidebarView = "list",
   selectedPipelineId,
   onOpenTemplates,
   onRefresh,
@@ -54,6 +58,8 @@ export function PipelineList({
   const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
+  const viewCopy = pipelineListViewCopy[sidebarView];
 
   const pipelines = useMemo(() => {
     const keyword = query.trim().toLowerCase();
@@ -64,10 +70,16 @@ export function PipelineList({
           value.toLowerCase().includes(keyword),
         );
       const matchesEnvironment = environmentFilter === "all" || pipeline.targetEnvironment === environmentFilter;
-      const matchesScope = activeScope === "joined" || favoriteIds.includes(pipeline.id);
-      return matchesKeyword && matchesEnvironment && matchesScope;
+      const matchesScope = sidebarView === "list" ? activeScope === "joined" || favoriteIds.includes(pipeline.id) : true;
+      const matchesSidebarView =
+        sidebarView === "groups"
+          ? pipelineGroupName(pipeline) !== "未分组"
+          : sidebarView === "ungrouped"
+            ? pipelineGroupName(pipeline) === "未分组"
+            : true;
+      return matchesKeyword && matchesEnvironment && matchesScope && matchesSidebarView;
     });
-  }, [activeScope, environmentFilter, favoriteIds, query, snapshot.pipelines]);
+  }, [activeScope, environmentFilter, favoriteIds, query, sidebarView, snapshot.pipelines]);
 
   const tekton = snapshot.tekton;
   const readyComponents = tekton.components.filter((component) => component.status === "ready").length;
@@ -94,10 +106,36 @@ export function PipelineList({
     setSelectedIds(allVisibleSelected ? [] : pipelines.map((pipeline) => pipeline.id));
   };
 
+  const closeMenu = () => {
+    setOpenMenuId(null);
+    setMenuPosition(null);
+  };
+
+  useEffect(() => {
+    if (!openMenuId) return;
+    const close = () => closeMenu();
+    window.addEventListener("resize", close);
+    window.addEventListener("scroll", close, true);
+    return () => {
+      window.removeEventListener("resize", close);
+      window.removeEventListener("scroll", close, true);
+    };
+  }, [openMenuId]);
+
+  useEffect(() => {
+    closeMenu();
+    if (sidebarView !== "list") {
+      setActiveScope("joined");
+    }
+  }, [sidebarView]);
+
   return (
     <section className="flow-content">
       <div className="flow-header">
-        <h1>我的流水线</h1>
+        <div>
+          <h1>{viewCopy.title}</h1>
+          <p className="flow-view-subtitle">{viewCopy.description}</p>
+        </div>
         <div className="flow-tools">
           <label className="cloud-search">
             <Search size={16} />
@@ -144,12 +182,18 @@ export function PipelineList({
         </article>
       </div>
       <div className="flow-tabs">
-        <button className={activeScope === "joined" ? "active" : ""} onClick={() => setActiveScope("joined")}>
-          我参与的
-        </button>
-        <button className={activeScope === "favorite" ? "active" : ""} onClick={() => setActiveScope("favorite")}>
-          我的收藏
-        </button>
+        {sidebarView === "list" ? (
+          <>
+            <button className={activeScope === "joined" ? "active" : ""} onClick={() => setActiveScope("joined")}>
+              我参与的
+            </button>
+            <button className={activeScope === "favorite" ? "active" : ""} onClick={() => setActiveScope("favorite")}>
+              我的收藏
+            </button>
+          </>
+        ) : (
+          <span className="flow-context-chip">{viewCopy.context}</span>
+        )}
         <button onClick={onOpenTemplates}>
           <Plus size={15} /> 添加
         </button>
@@ -236,12 +280,20 @@ export function PipelineList({
               onRun={() => onRunPipeline(pipeline)}
               onEdit={() => onEditPipeline(pipeline)}
               onCopy={() => void onCopy(pipeline.id, "流水线 ID")}
-              onToggleMenu={() => setOpenMenuId(openMenuId === pipeline.id ? null : pipeline.id)}
+              onToggleMenu={(rect) => {
+                if (openMenuId === pipeline.id) {
+                  closeMenu();
+                  return;
+                }
+                setOpenMenuId(pipeline.id);
+                setMenuPosition(positionRowMenu(rect));
+              }}
+              menuPosition={openMenuId === pipeline.id ? menuPosition : null}
             />
           );
         })}
         {pipelines.length === 0 && (
-          <div className="flow-empty-state">没有匹配的流水线，调整筛选条件或新建流水线。</div>
+          <div className="flow-empty-state">{viewCopy.empty}</div>
         )}
       </div>
     </section>
@@ -263,7 +315,8 @@ interface PipelineRowProps {
   onRun: () => void;
   onEdit: () => void;
   onCopy: () => void;
-  onToggleMenu: () => void;
+  onToggleMenu: (rect: DOMRect) => void;
+  menuPosition: { top: number; left: number } | null;
 }
 
 function PipelineRow({
@@ -282,7 +335,16 @@ function PipelineRow({
   onEdit,
   onCopy,
   onToggleMenu,
+  menuPosition,
 }: PipelineRowProps) {
+  const moreButtonRef = useRef<HTMLButtonElement>(null);
+
+  const toggleMenu = () => {
+    const rect = moreButtonRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    onToggleMenu(rect);
+  };
+
   return (
     <div className={isSelected ? "flow-table-row selected" : "flow-table-row"}>
       <span>
@@ -327,11 +389,14 @@ function PipelineRow({
         <button className="plain-icon" aria-label="运行" onClick={onRun}>
           <Play size={15} />
         </button>
-        <button className="plain-icon" aria-label="更多" onClick={onToggleMenu}>
+        <button ref={moreButtonRef} className="plain-icon" aria-label="更多" onClick={toggleMenu}>
           <MoreHorizontal size={16} />
         </button>
-        {menuOpen && (
-          <div className="action-menu row-action-menu">
+        {menuOpen && menuPosition && (
+          <div
+            className="action-menu row-action-menu floating"
+            style={{ top: menuPosition.top, left: menuPosition.left }}
+          >
             <button onClick={onEdit}>编辑配置</button>
             <button onClick={onCopy}>复制流水线 ID</button>
             <button onClick={onRun}>立即运行</button>
@@ -340,4 +405,52 @@ function PipelineRow({
       </span>
     </div>
   );
+}
+
+const pipelineListViewCopy: Record<PipelineListView, { title: string; description: string; context: string; empty: string }> = {
+  list: {
+    title: "我的流水线",
+    description: "查看你参与维护的流水线、最近运行状态和 Tekton 绑定。",
+    context: "我的视图",
+    empty: "没有匹配的流水线，调整筛选条件或新建流水线。",
+  },
+  all: {
+    title: "全部流水线",
+    description: "按全局维度查看当前工作台中的全部流水线。",
+    context: "全局流水线",
+    empty: "当前没有任何流水线，点击新建流水线开始配置。",
+  },
+  groups: {
+    title: "已分组流水线",
+    description: "只展示已经配置分组的流水线，方便按团队或系统聚合管理。",
+    context: "已分组",
+    empty: "暂无已分组流水线，可以在流水线基本信息中配置分组。",
+  },
+  ungrouped: {
+    title: "未分组流水线",
+    description: "集中整理尚未归档到分组的流水线。",
+    context: "未分组",
+    empty: "暂无未分组流水线。",
+  },
+};
+
+function pipelineGroupName(pipeline: PipelineDefinition): string {
+  const extended = pipeline as PipelineDefinition & { group?: string; groupId?: string; groupName?: string };
+  const configuredGroup =
+    extended.groupName ??
+    extended.group ??
+    extended.groupId ??
+    pipeline.variables?.find((variable) => ["group", "groupId", "groupName", "pipelineGroup"].includes(variable.key))?.value;
+  return configuredGroup?.trim() || "未分组";
+}
+
+function positionRowMenu(rect: DOMRect): { top: number; left: number } {
+  const menuWidth = 180;
+  const margin = 8;
+  const top = Math.min(rect.bottom + 8, window.innerHeight - 112);
+  const left = Math.min(
+    Math.max(margin, rect.right - menuWidth),
+    window.innerWidth - menuWidth - margin,
+  );
+  return { top, left };
 }

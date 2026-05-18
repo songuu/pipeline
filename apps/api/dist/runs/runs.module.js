@@ -15,6 +15,7 @@ const audit_module_1 = require("../audit/audit.module");
 const code_repos_module_1 = require("../code-repos/code-repos.module");
 const lifecycle_module_1 = require("../lifecycle/lifecycle.module");
 const pipelines_module_1 = require("../pipelines/pipelines.module");
+const run_events_repository_1 = require("./run-events.repository");
 const runs_controller_1 = require("./runs.controller");
 const runs_repository_1 = require("./runs.repository");
 const runs_service_1 = require("./runs.service");
@@ -36,8 +37,8 @@ exports.RunsModule = RunsModule = __decorate([
             pipelines_module_1.PipelinesModule,
         ],
         controllers: [runs_controller_1.RunsController],
-        providers: [runs_service_1.RunsService, runs_repository_1.RunsRepository],
-        exports: [runs_service_1.RunsService, runs_repository_1.RunsRepository],
+        providers: [runs_service_1.RunsService, runs_repository_1.RunsRepository, run_events_repository_1.RunEventsRepository],
+        exports: [runs_service_1.RunsService, runs_repository_1.RunsRepository, run_events_repository_1.RunEventsRepository],
     })
 ], RunsModule);
 //# sourceMappingURL=runs.module.js.map

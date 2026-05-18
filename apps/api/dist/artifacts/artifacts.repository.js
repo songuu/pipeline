@@ -14,7 +14,7 @@ const common_1 = require("@nestjs/common");
 const in_memory_repository_1 = require("../common/in-memory.repository");
 let ArtifactsRepository = class ArtifactsRepository extends in_memory_repository_1.InMemoryRepository {
     constructor() {
-        super([]);
+        super([], "artifacts");
     }
 };
 exports.ArtifactsRepository = ArtifactsRepository;

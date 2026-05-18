@@ -6,6 +6,7 @@ import { AuditModule } from "../audit/audit.module";
 import { CodeReposModule } from "../code-repos/code-repos.module";
 import { EnvironmentsModule } from "../environments/environments.module";
 import { PipelinesModule } from "../pipelines/pipelines.module";
+import { ReleasesModule } from "../releases/releases.module";
 import { RunnersModule } from "../runners/runners.module";
 import { RunsModule } from "../runs/runs.module";
 import { SnapshotController } from "./snapshot.controller";
@@ -20,6 +21,7 @@ import { SnapshotService } from "./snapshot.service";
     CodeReposModule,
     EnvironmentsModule,
     PipelinesModule,
+    ReleasesModule,
     RunnersModule,
     RunsModule,
   ],

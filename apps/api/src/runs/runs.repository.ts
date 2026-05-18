@@ -5,6 +5,6 @@ import { InMemoryRepository } from "../common/in-memory.repository";
 @Injectable()
 export class RunsRepository extends InMemoryRepository<PipelineRun> {
   constructor() {
-    super([]);
+    super([], "runs");
   }
 }

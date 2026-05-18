@@ -14,6 +14,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.RunsController = void 0;
 const common_1 = require("@nestjs/common");
+const rxjs_1 = require("rxjs");
 const shared_1 = require("@deploy-management/shared");
 const api_response_1 = require("../common/api-response");
 const zod_validation_pipe_1 = require("../common/zod-validation.pipe");
@@ -35,6 +36,25 @@ let RunsController = class RunsController {
     }
     legacyLogs(runId) {
         return this.runs.getLogs(runId);
+    }
+    legacyEvents(runId) {
+        return this.runs.getEvents(runId);
+    }
+    streamEvents(runId) {
+        this.runs.get(runId);
+        return new rxjs_1.Observable((subscriber) => {
+            let cursor = 0;
+            const publish = () => {
+                const events = this.runs.getEvents(runId);
+                for (const event of events.slice(cursor)) {
+                    subscriber.next({ data: event });
+                }
+                cursor = events.length;
+            };
+            publish();
+            const interval = setInterval(publish, 1_000);
+            return () => clearInterval(interval);
+        });
     }
     legacyTrigger(pipelineId, body) {
         return this.runs.trigger(pipelineId, body);
@@ -106,6 +126,20 @@ __decorate([
     __metadata("design:paramtypes", [String]),
     __metadata("design:returntype", Array)
 ], RunsController.prototype, "legacyLogs", null);
+__decorate([
+    (0, common_1.Get)("api/runs/:runId/events"),
+    __param(0, (0, common_1.Param)("runId")),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", Array)
+], RunsController.prototype, "legacyEvents", null);
+__decorate([
+    (0, common_1.Sse)("api/runs/:runId/events/stream"),
+    __param(0, (0, common_1.Param)("runId")),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", rxjs_1.Observable)
+], RunsController.prototype, "streamEvents", null);
 __decorate([
     (0, common_1.Post)("api/pipelines/:pipelineId/trigger"),
     __param(0, (0, common_1.Param)("pipelineId")),

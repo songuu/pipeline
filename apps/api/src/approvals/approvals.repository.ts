@@ -5,6 +5,6 @@ import { InMemoryRepository } from "../common/in-memory.repository";
 @Injectable()
 export class ApprovalsRepository extends InMemoryRepository<ApprovalRequest> {
   constructor() {
-    super([]);
+    super([], "approvals");
   }
 }

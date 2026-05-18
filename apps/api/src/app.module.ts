@@ -6,15 +6,19 @@ import { AuditModule } from "./audit/audit.module";
 import { CodeReposModule } from "./code-repos/code-repos.module";
 import { EnvironmentsModule } from "./environments/environments.module";
 import { ExecutorsModule } from "./executors/executors.module";
+import { KubernetesModule } from "./kubernetes/kubernetes.module";
 import { LifecycleModule } from "./lifecycle/lifecycle.module";
 import { PipelinesModule } from "./pipelines/pipelines.module";
+import { ReleasesModule } from "./releases/releases.module";
 import { RunnersModule } from "./runners/runners.module";
 import { RunsModule } from "./runs/runs.module";
 import { SnapshotModule } from "./snapshot/snapshot.module";
+import { StorageModule } from "./storage/storage.module";
 
 @Module({
   imports: [
     ExecutorsModule,
+    KubernetesModule,
     LifecycleModule,
     ApplicationsModule,
     ApprovalsModule,
@@ -23,9 +27,11 @@ import { SnapshotModule } from "./snapshot/snapshot.module";
     CodeReposModule,
     EnvironmentsModule,
     PipelinesModule,
+    ReleasesModule,
     RunnersModule,
     RunsModule,
     SnapshotModule,
+    StorageModule,
   ],
 })
 export class AppModule {}

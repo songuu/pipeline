@@ -95,11 +95,19 @@ export function WebhookField({
   );
 }
 
-export function MiniFlow({ chips }: { chips: string[] }) {
+export function MiniFlow({ chips, groups }: { chips?: string[]; groups?: string[][] }) {
+  const flowGroups = groups?.length ? groups : (chips ?? []).map((chip) => [chip]);
   return (
     <div className="mini-flow">
-      {chips.map((chip) => (
-        <span key={chip}>{chip}</span>
+      {flowGroups.map((group, groupIndex) => (
+        <span
+          className={group.length > 1 ? "mini-flow-group parallel" : "mini-flow-group"}
+          key={`${group.join("-")}-${groupIndex}`}
+        >
+          {group.map((chip) => (
+            <i key={chip} title={chip}>{chip}</i>
+          ))}
+        </span>
       ))}
     </div>
   );

@@ -14,6 +14,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ApprovalsService = void 0;
 const common_1 = require("@nestjs/common");
+const ids_1 = require("../common/ids");
 const approvals_repository_1 = require("./approvals.repository");
 let ApprovalsService = class ApprovalsService {
     repo;
@@ -32,7 +33,7 @@ let ApprovalsService = class ApprovalsService {
     }
     async createForRun(run) {
         const approval = {
-            id: `approval-${this.repo.snapshot().length + 1}`,
+            id: (0, ids_1.createStableId)("approval"),
             runId: run.id,
             title: `${run.applicationName} ${run.environment} 灰度 ${run.canaryPercent}% 后全量发布`,
             requester: run.actor,

@@ -1,5 +1,6 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { ApprovalRequest, ApprovalStatus, PipelineRun } from "@deploy-management/shared";
+import { createStableId } from "../common/ids";
 import { ApprovalsRepository } from "./approvals.repository";
 
 @Injectable()
@@ -20,7 +21,7 @@ export class ApprovalsService {
 
   async createForRun(run: PipelineRun): Promise<ApprovalRequest> {
     const approval: ApprovalRequest = {
-      id: `approval-${this.repo.snapshot().length + 1}`,
+      id: createStableId("approval"),
       runId: run.id,
       title: `${run.applicationName} ${run.environment} 灰度 ${run.canaryPercent}% 后全量发布`,
       requester: run.actor,

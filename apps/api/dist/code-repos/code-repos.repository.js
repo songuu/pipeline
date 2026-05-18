@@ -15,7 +15,7 @@ const in_memory_repository_1 = require("../common/in-memory.repository");
 const seed_data_1 = require("../common/seed-data");
 let CodeReposRepository = class CodeReposRepository extends in_memory_repository_1.InMemoryRepository {
     constructor() {
-        super(seed_data_1.SEED_REPOSITORIES);
+        super(seed_data_1.SEED_REPOSITORIES, "code-repositories");
     }
 };
 exports.CodeReposRepository = CodeReposRepository;

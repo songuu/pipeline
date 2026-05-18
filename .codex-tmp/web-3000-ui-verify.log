@@ -1,0 +1,7 @@
+
+> @deploy-management/web@0.1.0 dev C:\project\company\deploy-management\apps\web
+> next dev --hostname 0.0.0.0 --port 3000
+
+C:\project\company\deploy-management\apps\web:
+ ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL  @deploy-management/web@0.1.0 dev: `next dev --hostname 0.0.0.0 --port 3000`
+Exit status 1

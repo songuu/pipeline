@@ -14,7 +14,18 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-const flowSideItems: Array<{ key: string; label: string; icon: LucideIcon }> = [
+export type FlowNavKey =
+  | "list"
+  | "all"
+  | "groups"
+  | "ungrouped"
+  | "runs"
+  | "artifacts"
+  | "tekton"
+  | "usage"
+  | "settings";
+
+const flowSideItems: Array<{ key: FlowNavKey; label: string; icon: LucideIcon }> = [
   { key: "list", label: "我的流水线", icon: Workflow },
   { key: "all", label: "全部流水线", icon: Activity },
   { key: "groups", label: "已分组", icon: ListChecks },
@@ -28,8 +39,8 @@ export function FlowSidebar({
   activeKey = "list",
   onSelect,
 }: {
-  activeKey?: string;
-  onSelect: (key: string, label: string) => void;
+  activeKey?: FlowNavKey;
+  onSelect: (key: FlowNavKey, label: string) => void;
 }) {
   return (
     <aside className="flow-sidebar">
@@ -54,11 +65,17 @@ export function FlowSidebar({
         })}
       </div>
       <div className="repo-footer">
-        <button className="repo-nav-item" onClick={() => onSelect("usage", "资源用量")}>
+        <button
+          className={activeKey === "usage" ? "repo-nav-item active" : "repo-nav-item"}
+          onClick={() => onSelect("usage", "资源用量")}
+        >
           <Database size={16} />
           <span>资源用量</span>
         </button>
-        <button className="repo-nav-item" onClick={() => onSelect("settings", "全局设置")}>
+        <button
+          className={activeKey === "settings" ? "repo-nav-item active" : "repo-nav-item"}
+          onClick={() => onSelect("settings", "全局设置")}
+        >
           <Settings size={16} />
           <span>全局设置</span>
         </button>

@@ -6,6 +6,6 @@ import { SEED_PIPELINES } from "../common/seed-data";
 @Injectable()
 export class PipelinesRepository extends InMemoryRepository<PipelineDefinition> {
   constructor() {
-    super(SEED_PIPELINES);
+    super(SEED_PIPELINES, "pipelines");
   }
 }

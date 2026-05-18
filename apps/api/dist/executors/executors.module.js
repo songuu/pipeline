@@ -9,20 +9,27 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.ExecutorsModule = void 0;
 const common_1 = require("@nestjs/common");
 const executor_adapter_1 = require("../lifecycle/executor-adapter");
+const local_docker_executor_1 = require("./local-docker.executor");
 const simulated_executor_1 = require("./simulated.executor");
 const tekton_executor_1 = require("./tekton.executor");
 const executorProvider = {
     provide: executor_adapter_1.EXECUTOR_ADAPTER,
-    inject: [simulated_executor_1.SimulatedExecutor, tekton_executor_1.TektonBridgeExecutor],
-    useFactory: (simulated, tekton) => process.env.EXECUTOR === "tekton" ? tekton : simulated,
+    inject: [simulated_executor_1.SimulatedExecutor, tekton_executor_1.TektonBridgeExecutor, local_docker_executor_1.LocalDockerExecutor],
+    useFactory: (simulated, tekton, localDocker) => {
+        if (process.env.EXECUTOR === "tekton")
+            return tekton;
+        if (process.env.EXECUTOR === "local-docker")
+            return localDocker;
+        return simulated;
+    },
 };
 let ExecutorsModule = class ExecutorsModule {
 };
 exports.ExecutorsModule = ExecutorsModule;
 exports.ExecutorsModule = ExecutorsModule = __decorate([
     (0, common_1.Module)({
-        providers: [simulated_executor_1.SimulatedExecutor, tekton_executor_1.TektonBridgeExecutor, executorProvider],
-        exports: [executor_adapter_1.EXECUTOR_ADAPTER, simulated_executor_1.SimulatedExecutor, tekton_executor_1.TektonBridgeExecutor],
+        providers: [simulated_executor_1.SimulatedExecutor, tekton_executor_1.TektonBridgeExecutor, local_docker_executor_1.LocalDockerExecutor, executorProvider],
+        exports: [executor_adapter_1.EXECUTOR_ADAPTER, simulated_executor_1.SimulatedExecutor, tekton_executor_1.TektonBridgeExecutor, local_docker_executor_1.LocalDockerExecutor],
     })
 ], ExecutorsModule);
 //# sourceMappingURL=executors.module.js.map

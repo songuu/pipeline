@@ -5,6 +5,6 @@ import { InMemoryRepository } from "../common/in-memory.repository";
 @Injectable()
 export class ArtifactsRepository extends InMemoryRepository<Artifact> {
   constructor() {
-    super([]);
+    super([], "artifacts");
   }
 }

@@ -6,6 +6,7 @@ import { AuditModule } from "../audit/audit.module";
 import { CodeReposModule } from "../code-repos/code-repos.module";
 import { LifecycleModule } from "../lifecycle/lifecycle.module";
 import { PipelinesModule } from "../pipelines/pipelines.module";
+import { RunEventsRepository } from "./run-events.repository";
 import { RunsController } from "./runs.controller";
 import { RunsRepository } from "./runs.repository";
 import { RunsService } from "./runs.service";
@@ -24,7 +25,7 @@ import { RunsService } from "./runs.service";
     PipelinesModule,
   ],
   controllers: [RunsController],
-  providers: [RunsService, RunsRepository],
-  exports: [RunsService, RunsRepository],
+  providers: [RunsService, RunsRepository, RunEventsRepository],
+  exports: [RunsService, RunsRepository, RunEventsRepository],
 })
 export class RunsModule {}

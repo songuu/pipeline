@@ -14,6 +14,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.AuditService = void 0;
 const common_1 = require("@nestjs/common");
+const ids_1 = require("../common/ids");
 const audit_repository_1 = require("./audit.repository");
 let AuditService = class AuditService {
     repo;
@@ -25,7 +26,7 @@ let AuditService = class AuditService {
     }
     async record(actor, action, target) {
         const event = {
-            id: `audit-${this.repo.snapshot().length + 1}`,
+            id: (0, ids_1.createStableId)("audit"),
             actor,
             action,
             target,

@@ -22,6 +22,7 @@ const audit_service_1 = require("../audit/audit.service");
 const code_repos_service_1 = require("../code-repos/code-repos.service");
 const environments_service_1 = require("../environments/environments.service");
 const pipelines_service_1 = require("../pipelines/pipelines.service");
+const releases_service_1 = require("../releases/releases.service");
 const runners_service_1 = require("../runners/runners.service");
 const runs_service_1 = require("../runs/runs.service");
 let SnapshotService = class SnapshotService {
@@ -32,9 +33,10 @@ let SnapshotService = class SnapshotService {
     codeRepos;
     environments;
     pipelines;
+    releases;
     runners;
     runs;
-    constructor(applications, approvals, artifacts, audit, codeRepos, environments, pipelines, runners, runs) {
+    constructor(applications, approvals, artifacts, audit, codeRepos, environments, pipelines, releases, runners, runs) {
         this.applications = applications;
         this.approvals = approvals;
         this.artifacts = artifacts;
@@ -42,6 +44,7 @@ let SnapshotService = class SnapshotService {
         this.codeRepos = codeRepos;
         this.environments = environments;
         this.pipelines = pipelines;
+        this.releases = releases;
         this.runners = runners;
         this.runs = runs;
     }
@@ -67,6 +70,12 @@ let SnapshotService = class SnapshotService {
             environments: this.environments.list(),
             runnerPools: this.runners.list(),
             artifacts: this.artifacts.list(),
+            releases: this.releases.list(),
+            deploymentTargets: this.environments.listDeploymentTargets(),
+            releasePlans: this.releases.listReleasePlans(),
+            releaseExecutions: this.releases.listReleaseExecutions(),
+            releaseEvents: this.releases.listReleaseEvents(),
+            environmentLocks: this.environments.listEnvironmentLocks(),
             auditEvents: this.audit.list(),
             tekton: buildTektonSnapshot(runs, this.pipelines.list()),
         };
@@ -82,8 +91,9 @@ exports.SnapshotService = SnapshotService = __decorate([
     __param(4, (0, common_1.Inject)(code_repos_service_1.CodeReposService)),
     __param(5, (0, common_1.Inject)(environments_service_1.EnvironmentsService)),
     __param(6, (0, common_1.Inject)(pipelines_service_1.PipelinesService)),
-    __param(7, (0, common_1.Inject)(runners_service_1.RunnersService)),
-    __param(8, (0, common_1.Inject)(runs_service_1.RunsService)),
+    __param(7, (0, common_1.Inject)(releases_service_1.ReleasesService)),
+    __param(8, (0, common_1.Inject)(runners_service_1.RunnersService)),
+    __param(9, (0, common_1.Inject)(runs_service_1.RunsService)),
     __metadata("design:paramtypes", [applications_service_1.ApplicationsService,
         approvals_service_1.ApprovalsService,
         artifacts_service_1.ArtifactsService,
@@ -91,6 +101,7 @@ exports.SnapshotService = SnapshotService = __decorate([
         code_repos_service_1.CodeReposService,
         environments_service_1.EnvironmentsService,
         pipelines_service_1.PipelinesService,
+        releases_service_1.ReleasesService,
         runners_service_1.RunnersService,
         runs_service_1.RunsService])
 ], SnapshotService);
@@ -114,8 +125,13 @@ function buildTektonSnapshot(runs, pipelines) {
         },
         cluster: {
             context: "ack-prod-shanghai / tekton-system",
-            executorMode: process.env.EXECUTOR === "tekton" ? "tekton" : "simulated",
+            executorMode: runs.find((run) => run.executor)?.executor?.backend ?? executorModeFromEnv(),
             namespaces: ["tekton-pipelines", "tekton-triggers", "tekton-results", "tekton-chains"],
+            pipelineRefConfigured: Boolean(process.env.TEKTON_PIPELINE_REF),
+            sourcePvcConfigured: Boolean(process.env.TEKTON_SOURCE_PVC),
+            dockerSecretFallbackConfigured: Boolean(process.env.TEKTON_DOCKER_SECRET),
+            localRegistryPasswordConfigured: hasLocalRegistryPassword(),
+            simulatedFallbackEnabled: process.env.TEKTON_ALLOW_SIMULATED_FALLBACK === "true",
         },
         components: [
             component("Operator", "tekton-operator", "v0.77.0", 1, 1),
@@ -129,6 +145,16 @@ function buildTektonSnapshot(runs, pipelines) {
         bindings,
         runRecords: runs.map((run) => buildTektonRunRecord(run, bindings)),
     };
+}
+function executorModeFromEnv() {
+    if (process.env.EXECUTOR === "tekton")
+        return "tekton";
+    if (process.env.EXECUTOR === "local-docker")
+        return "local-docker";
+    return "simulated";
+}
+function hasLocalRegistryPassword() {
+    return Boolean(process.env.ACR_PASSWORD || process.env.ALIYUN_ACR_PASSWORD || process.env.REGISTRY_PASSWORD || process.env.DOCKER_PASSWORD);
 }
 function component(name, namespace, version, readyReplicas, desiredReplicas) {
     return {
@@ -152,6 +178,9 @@ function buildTektonBinding(pipeline) {
         allowRuntimeTag: true,
         allowRuntimeCommit: true,
     };
+    const pipelineVariables = pipeline.variables?.length ? pipeline.variables : defaultPipelineVariables(pipeline);
+    const image = (0, shared_1.resolveImageArtifact)(pipeline);
+    const buildConfig = pipeline.buildConfig ?? shared_1.DEFAULT_PIPELINE_BUILD_CONFIG;
     const params = [
         { key: "git-url", value: pipeline.repository },
         { key: "revision", value: pipeline.defaultRef },
@@ -160,8 +189,20 @@ function buildTektonBinding(pipeline) {
         { key: "tag-allowlist", value: sourcePolicy.allowedTagPatterns.join(",") },
         { key: "target-env", value: pipeline.targetEnvironment },
         { key: "canary-percent", value: String(pipeline.canaryPercent) },
-        ...(pipeline.variables ?? []),
-        ...(pipeline.runtimeVariables ?? []).map((param) => ({ ...param, key: `runtime.${param.key}` })),
+        { key: "REGISTRY_PROVIDER", value: image.registryProvider ?? "custom", injectionTiming: "build", targetStages: ["build", "upload"] },
+        { key: "IMAGE_REGISTRY", value: image.registryUrl, injectionTiming: "build", targetStages: ["build", "upload"] },
+        { key: "IMAGE_REPOSITORY", value: image.repository, injectionTiming: "build", targetStages: ["build", "upload"] },
+        { key: "IMAGE_REF", value: image.imageRef, injectionTiming: "build", targetStages: ["build", "upload", "deploy"] },
+        { key: "DOCKERFILE_PATH", value: image.dockerfilePath, injectionTiming: "build", targetStages: ["build", "upload"] },
+        { key: "BUILD_CONTEXT", value: image.contextPath, injectionTiming: "build", targetStages: ["build", "upload"] },
+        { key: "BUILD_RUNTIME", value: buildConfig.runtime ?? "node", injectionTiming: "build", targetStages: ["test", "build"] },
+        { key: "PACKAGE_BUILD_SCRIPT", value: buildConfig.packageBuildScript, injectionTiming: "build", targetStages: ["build"] },
+        { key: "PACKAGE_OUTPUT_PATHS", value: buildConfig.packageOutputPaths.join(","), injectionTiming: "build", targetStages: ["build"] },
+        { key: "REGISTRY_SERVICE_CONNECTION", value: image.serviceConnection, injectionTiming: "build", targetStages: ["upload"] },
+        { key: "REGISTRY_USERNAME", value: image.registryUsername ?? "", injectionTiming: "build", targetStages: ["upload"] },
+        { key: "REGISTRY_DOCKER_SECRET", value: image.dockerConfigSecret ?? "", injectionTiming: "build", targetStages: ["upload"] },
+        ...pipelineVariables.map((param) => withParamInjectionDefaults(param)),
+        ...(pipeline.runtimeVariables ?? []).map((param) => withParamInjectionDefaults({ ...param, key: `runtime.${param.key}`, injectionTiming: "runtime" })),
     ];
     const workspaceBindings = buildWorkspaceBindings(pipeline, pipelineName);
     return {
@@ -190,7 +231,7 @@ function buildTektonBinding(pipeline) {
         },
         chains: {
             format: "slsa/v1",
-            storage: ["tekton", "oci"],
+            storage: ["tekton", `oci://${(0, shared_1.resolveImageArtifact)(pipeline).repository}`],
             signedArtifacts: pipeline.requiresApproval ? 6 : 3,
         },
     };
@@ -222,6 +263,7 @@ function buildTektonRunRecord(run, bindings) {
         runId: run.id,
         namespace,
         pipelineRunName,
+        executorBackend: run.executor?.backend,
         status,
         conditionReason: condition.reason,
         conditionMessage: condition.message,
@@ -243,7 +285,7 @@ function buildTektonRunRecord(run, bindings) {
             : {
                 name: `${pipelineRunName}.intoto.jsonl`,
                 format: "slsa/v1",
-                storage: "oci://registry.internal/provenance",
+                storage: `oci://${(0, shared_1.resolveImageArtifact)(run.definitionSnapshot, run).repository}/provenance`,
                 signed: run.status === "success",
                 digest: `sha256:${run.commit}${run.id.replace("run-", "")}`,
             },
@@ -279,6 +321,7 @@ function buildResolverRef(pipeline, pipelineName, resolver) {
 }
 function buildWorkspaceBindings(pipeline, pipelineName) {
     const cacheEnabled = pipeline.caches?.some((cache) => cache.enabled) ?? true;
+    const image = (0, shared_1.resolveImageArtifact)(pipeline);
     return [
         {
             name: "source-ws",
@@ -302,7 +345,7 @@ function buildWorkspaceBindings(pipeline, pipelineName) {
             name: "docker-config",
             type: "secret",
             mountPath: "/tekton/home/.docker",
-            secretName: "acr-push-secret",
+            secretName: image.dockerConfigSecret || `${sanitizeKubernetesName(image.serviceConnection)}-secret`,
             readOnly: true,
             description: "镜像仓库凭据，仅暴露给构建和上传任务。",
         },
@@ -316,13 +359,52 @@ function buildWorkspaceBindings(pipeline, pipelineName) {
         },
     ];
 }
+function withParamInjectionDefaults(param) {
+    const injectionTiming = param.injectionTiming ?? defaultInjectionTiming(param.key);
+    return {
+        ...param,
+        injectionTiming,
+        targetStages: param.targetStages ?? defaultTargetStages(param.key, injectionTiming),
+    };
+}
+function defaultPipelineVariables(pipeline) {
+    return [
+        {
+            key: "NODE_ENV",
+            value: pipeline.targetEnvironment,
+            description: "构建时注入，决定测试和构建产物的目标环境。",
+            injectionTiming: "build",
+            targetStages: ["test", "build", "package"],
+        },
+        {
+            key: "IMAGE_TAG",
+            value: "${run.id}-${commit.short}",
+            description: "构建时注入，用于镜像与制品版本追踪。",
+            injectionTiming: "build",
+            targetStages: ["build", "upload", "deploy"],
+        },
+        {
+            key: "DEPLOY_NAMESPACE",
+            value: `${pipeline.applicationId}-${pipeline.targetEnvironment}`,
+            description: "部署时注入，渲染 Kubernetes manifest 与发布策略。",
+            injectionTiming: "deploy",
+            targetStages: ["deploy", "canary", "promote"],
+        },
+    ];
+}
+function paramAppliesToStage(param, stage) {
+    if (param.targetStages?.includes(stage))
+        return true;
+    const stageKeys = stageParamKeys[stage] ?? ["git-url", "revision", "target-env"];
+    return stageKeys.includes(param.key);
+}
 function buildTaskGraph(pipeline, params, workspaces) {
     return pipeline.stages.map((stage, index) => ({
         name: stage,
         taskRef: `${stage}-task`,
         runAfter: index === 0 ? [] : [pipeline.stages[index - 1]],
         workspaces: (stageWorkspaces[stage] ?? ["source-ws"]).filter((name) => workspaces.some((workspace) => workspace.name === name)),
-        params: params.filter((param) => stageParamKeys[stage]?.includes(param.key) ?? ["git-url", "revision", "target-env"].includes(param.key)),
+        params: params.filter((param) => paramAppliesToStage(param, stage)),
         retries: stage === "upload" || stage === "deploy" ? 1 : 0,
         timeoutSeconds: stageTimeoutSeconds[stage],
         when: stage === "approval"
@@ -331,6 +413,8 @@ function buildTaskGraph(pipeline, params, workspaces) {
     }));
 }
 function buildRunParams(run, binding) {
+    const image = (0, shared_1.resolveImageArtifact)(run.definitionSnapshot, run);
+    const buildConfig = run.definitionSnapshot.buildConfig ?? shared_1.DEFAULT_PIPELINE_BUILD_CONFIG;
     return [
         { key: "git-url", value: run.repository },
         { key: "revision", value: run.refName },
@@ -338,13 +422,30 @@ function buildRunParams(run, binding) {
         { key: "ref-type", value: run.refType },
         { key: "target-env", value: run.environment },
         { key: "canary-percent", value: String(run.canaryPercent) },
-        ...(binding?.params.filter((param) => param.key.startsWith("runtime.") || param.key === "IMAGE_TAG" || param.key === "NODE_ENV") ?? []),
+        { key: "REGISTRY_PROVIDER", value: image.registryProvider ?? "custom" },
+        { key: "IMAGE_REGISTRY", value: image.registryUrl },
+        { key: "IMAGE_REPOSITORY", value: image.repository },
+        { key: "IMAGE_TAG", value: image.tag },
+        { key: "IMAGE_REF", value: image.imageRef },
+        { key: "DOCKERFILE_PATH", value: image.dockerfilePath },
+        { key: "BUILD_CONTEXT", value: image.contextPath },
+        { key: "BUILD_RUNTIME", value: buildConfig.runtime ?? "node" },
+        { key: "PACKAGE_BUILD_SCRIPT", value: buildConfig.packageBuildScript },
+        { key: "PACKAGE_OUTPUT_PATHS", value: buildConfig.packageOutputPaths.join(",") },
+        { key: "REGISTRY_SERVICE_CONNECTION", value: image.serviceConnection },
+        { key: "REGISTRY_USERNAME", value: image.registryUsername ?? "" },
+        { key: "REGISTRY_DOCKER_SECRET", value: image.dockerConfigSecret ?? "" },
+        ...(binding?.params.filter((param) => param.key.startsWith("runtime.") || Boolean(param.injectionTiming)) ?? []),
     ];
 }
 function buildTaskRunResults(stage, run, status) {
     if (status === "INIT")
         return {};
-    const image = `registry.internal/${run.applicationName}:${run.id}`;
+    const image = (0, shared_1.resolveImageArtifact)(run.definitionSnapshot, run);
+    const variableNamesByTiming = (timing) => (run.definitionSnapshot.variables ?? [])
+        .filter((param) => (param.injectionTiming ?? defaultInjectionTiming(param.key)) === timing)
+        .map((param) => param.key)
+        .join(",") || "none";
     const values = {
         source: {
             commit: run.commit,
@@ -356,24 +457,32 @@ function buildTaskRunResults(stage, run, status) {
             qualityGate: status === "SUCCESS" ? "passed" : "blocked",
         },
         build: {
-            image,
+            image: image.imageRef,
+            imageRepository: image.repository,
             buildDigest: `sha256:${run.commit}${run.id.replace("run-", "")}`,
+            buildTimeEnv: variableNamesByTiming("build"),
         },
         env: {
             envFile: `/workspace/source/.deploy/${run.environment}.env`,
             configHash: `cfg-${run.commit.slice(0, 7)}`,
+            buildTimeVariables: variableNamesByTiming("build"),
+            runtimeVariables: variableNamesByTiming("runtime"),
+            deployTimeVariables: variableNamesByTiming("deploy"),
         },
         package: {
             sbom: `${run.id}-sbom.spdx.json`,
             provenanceMaterial: `${run.id}-materials.json`,
         },
         upload: {
-            imageUrl: image,
-            registryDigest: `sha256:${run.commit}${run.canaryPercent}`,
+            imageUrl: image.imageRef,
+            registryUrl: image.registryUrl,
+            serviceConnection: image.serviceConnection,
+            registryDigest: imageDigestResult(run) ?? "waiting-for-task-result",
         },
         deploy: {
             release: `${run.applicationName}-${run.environment}`,
             namespace: `${run.applicationName}-${run.environment}`,
+            runtimeEnv: variableNamesByTiming("runtime"),
         },
         canary: {
             trafficPercent: `${run.canaryPercent}%`,
@@ -422,14 +531,24 @@ function buildRunResults(run, pipelineRunName, taskRuns, events) {
             storedAt,
             summary: `${events.length} 条事件与阶段日志可长期查询。`,
         },
-        {
-            name: `${pipelineRunName}-artifact`,
-            recordType: "Artifact",
-            value: `registry.internal/${run.applicationName}:${run.id}`,
-            storedAt,
-            summary: "镜像、SBOM 和 provenance 记录关联到本次运行。",
-        },
+        ...(hasRealImageResult(run)
+            ? [{
+                    name: `${pipelineRunName}-artifact`,
+                    recordType: "Artifact",
+                    value: (0, shared_1.resolveImageArtifact)(run.definitionSnapshot, run).imageRef,
+                    storedAt,
+                    summary: "真实镜像 digest 已由 TaskRun result 回写并关联到本次运行。",
+                }]
+            : []),
     ];
+}
+function hasRealImageResult(run) {
+    return Boolean(imageDigestResult(run));
+}
+function imageDigestResult(run) {
+    const value = run.stages.find((stage) => stage.key === "upload")?.metadata.imageDigest;
+    const realBackend = run.executor?.backend === "tekton" || run.executor?.backend === "local-docker";
+    return realBackend && typeof value === "string" && value.startsWith("sha256:") ? value : undefined;
 }
 function buildRunEvents(run, pipelineRunName, condition) {
     const events = [
@@ -494,10 +613,10 @@ function sanitizeKubernetesName(value) {
 const stageStepNames = {
     source: ["resolve-revision", "clone", "checkout"],
     test: ["install", "unit-test", "sast"],
-    build: ["compile", "container-build"],
+    build: ["install", "package-script", "archive"],
     env: ["merge-vars", "project-secrets", "write-env"],
     package: ["sbom", "provenance-material"],
-    upload: ["push-image", "write-digest"],
+    upload: ["docker-build", "docker-push", "write-digest"],
     deploy: ["render-manifest", "kubectl-apply"],
     canary: ["route-traffic", "observe-slo"],
     approval: ["wait-approval"],
@@ -506,10 +625,10 @@ const stageStepNames = {
 const stageImages = {
     source: "alpine/git:2.45",
     test: "node:20-alpine",
-    build: "gcr.io/kaniko-project/executor:v1.23.2",
+    build: "node:20-alpine",
     env: "build-steps/alinux3",
     package: "anchore/syft:v1.4.1",
-    upload: "buildpacksio/crane:latest",
+    upload: "docker:27-cli",
     deploy: "bitnami/kubectl:1.30",
     canary: "istio/istioctl:1.22",
     approval: "busybox:1.36",
@@ -529,10 +648,57 @@ const stageWorkspaces = {
 };
 const stageParamKeys = {
     source: ["git-url", "revision", "ref-type", "branch-allowlist", "tag-allowlist"],
+    test: ["NODE_ENV", "runtime.RELEASE_NOTE"],
+    build: ["NODE_ENV", "BUILD_RUNTIME", "PACKAGE_BUILD_SCRIPT", "PACKAGE_OUTPUT_PATHS", "REGISTRY_PROVIDER", "IMAGE_TAG", "IMAGE_REPOSITORY", "IMAGE_REF", "DOCKERFILE_PATH", "BUILD_CONTEXT"],
     env: ["target-env", "NODE_ENV", "runtime.RELEASE_NOTE"],
+    package: ["IMAGE_TAG", "NODE_ENV"],
+    upload: ["REGISTRY_PROVIDER", "IMAGE_TAG", "IMAGE_REGISTRY", "IMAGE_REPOSITORY", "IMAGE_REF", "DOCKERFILE_PATH", "BUILD_CONTEXT", "REGISTRY_SERVICE_CONNECTION", "REGISTRY_USERNAME", "REGISTRY_DOCKER_SECRET"],
     deploy: ["target-env", "canary-percent", "DEPLOY_NAMESPACE"],
     canary: ["target-env", "canary-percent"],
+    promote: ["target-env", "DEPLOY_NAMESPACE", "runtime.RELEASE_NOTE"],
 };
+function defaultInjectionTiming(key) {
+    if (key === "NODE_ENV" || key === "IMAGE_TAG" || isPublicSupabaseBuildKey(key))
+        return "build";
+    if (key === "DEPLOY_NAMESPACE" || isPrivateSupabaseRuntimeKey(key))
+        return "deploy";
+    return key.startsWith("runtime.") ? "runtime" : "runtime";
+}
+function defaultTargetStages(key, injectionTiming) {
+    if (key === "NODE_ENV")
+        return ["test", "build", "package"];
+    if (key === "IMAGE_TAG")
+        return ["build", "upload", "deploy"];
+    if (isPublicSupabaseBuildKey(key))
+        return ["test", "build", "package"];
+    if (isPrivateSupabaseRuntimeKey(key))
+        return ["deploy", "canary", "promote"];
+    if (key.startsWith("IMAGE_") || key === "DOCKERFILE_PATH" || key === "BUILD_CONTEXT" || key.startsWith("REGISTRY_")) {
+        return ["build", "upload", "deploy"];
+    }
+    if (key === "DEPLOY_NAMESPACE")
+        return ["deploy", "canary", "promote"];
+    if (key.startsWith("runtime."))
+        return ["deploy", "canary", "approval", "promote"];
+    if (injectionTiming === "build")
+        return ["test", "build", "package"];
+    if (injectionTiming === "deploy")
+        return ["deploy", "canary", "promote"];
+    return ["deploy", "canary", "approval", "promote"];
+}
+function isPublicSupabaseBuildKey(key) {
+    return [
+        "SUPABASE_URL",
+        "SUPABASE_ANON_KEY",
+        "SUPABASE_PUBLISHABLE_KEY",
+        "NEXT_PUBLIC_SUPABASE_URL",
+        "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+        "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
+    ].includes(key);
+}
+function isPrivateSupabaseRuntimeKey(key) {
+    return ["SUPABASE_DB_URL", "SUPABASE_SECRET_KEY", "SUPABASE_SERVICE_ROLE_KEY"].includes(key);
+}
 const stageTimeoutSeconds = {
     source: 300,
     test: 900,

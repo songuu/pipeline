@@ -5,9 +5,11 @@
   "type": "module",
   "scripts": {
     "dev:api": "pnpm --filter @deploy-management/api dev",
+    "dev:api:local-docker": "powershell -ExecutionPolicy Bypass -File scripts/dev-api-local-docker.ps1",
     "dev:web": "pnpm --filter @deploy-management/web dev",
     "build": "pnpm -r build",
-    "check": "pnpm -r check"
+    "check": "pnpm -r check",
+    "test": "pnpm -r --if-present test"
   },
   "devDependencies": {
     "typescript": "^5.9.0"

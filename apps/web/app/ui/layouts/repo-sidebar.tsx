@@ -35,7 +35,7 @@ export function RepoSidebar({
     <aside className="repo-sidebar">
       <div className="repo-title">
         <div className="repo-logo">C</div>
-        <strong>Codeup-Demo</strong>
+        <strong>代码仓库</strong>
       </div>
       <nav className="repo-nav">
         {repoNavItems.map((item) => {
@@ -45,7 +45,7 @@ export function RepoSidebar({
             <button
               key={item.key}
               className={active ? "repo-nav-item active" : "repo-nav-item"}
-              onClick={active ? onOpenList : () => onAction(`${item.label} 已切换，当前演示聚焦流水线链路`)}
+              onClick={active ? onOpenList : () => onAction(`${item.label} 已切换`)}
             >
               <Icon size={16} />
               <span>{item.label}</span>
@@ -55,11 +55,11 @@ export function RepoSidebar({
         })}
       </nav>
       <div className="repo-footer">
-        <button className="repo-nav-item" onClick={() => onAction("成员面板已打开：RO、Owner、SRE 审批人")}>
+        <button className="repo-nav-item" onClick={() => onAction("成员面板已打开")}>
           <UserCheck size={16} />
           <span>成员</span>
         </button>
-        <button className="repo-nav-item" onClick={() => onAction("仓库设置已关联到流水线默认源")}>
+        <button className="repo-nav-item" onClick={() => onAction("仓库设置已打开")}>
           <Settings size={16} />
           <span>设置</span>
         </button>

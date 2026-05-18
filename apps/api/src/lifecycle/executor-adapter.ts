@@ -2,7 +2,7 @@ import type { RunEvent, RunHandle, RunStatus, StartRunInput } from "@deploy-mana
 
 /**
  * ExecutorAdapter 是控制面与执行内核的边界。
- * SimulatedExecutor (内存推进) 与 TektonBridgeExecutor (Go 服务 + Tekton CRD)
+ * SimulatedExecutor、TektonBridgeExecutor 与 LocalDockerExecutor
  * 都实现该端口，由环境变量 EXECUTOR 选择。
  */
 export interface ExecutorAdapter {

@@ -28,12 +28,18 @@ func NewRouter(h *Handler) chi.Router {
 	}))
 
 	r.Get("/healthz", h.Health)
+	r.Get("/v1/capabilities", h.Capabilities)
+	r.Post("/v1/preflight", h.Preflight)
 	r.Route("/v1/runs", func(r chi.Router) {
 		r.Post("/", h.CreateRun)
 		r.Route("/{runId}", func(r chi.Router) {
 			r.Get("/", h.GetRun)
 			r.Post("/cancel", h.CancelRun)
 			r.Get("/events", h.StreamEvents)
+			r.Route("/taskruns/{taskRunName}", func(r chi.Router) {
+				r.Get("/", h.GetTaskRun)
+				r.Get("/logs", h.GetTaskRunLogs)
+			})
 		})
 	})
 

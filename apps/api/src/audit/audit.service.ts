@@ -1,5 +1,6 @@
 import { Inject, Injectable } from "@nestjs/common";
 import type { AuditEvent } from "@deploy-management/shared";
+import { createStableId } from "../common/ids";
 import { AuditRepository } from "./audit.repository";
 
 @Injectable()
@@ -12,7 +13,7 @@ export class AuditService {
 
   async record(actor: string, action: string, target: string): Promise<AuditEvent> {
     const event: AuditEvent = {
-      id: `audit-${this.repo.snapshot().length + 1}`,
+      id: createStableId("audit"),
       actor,
       action,
       target,

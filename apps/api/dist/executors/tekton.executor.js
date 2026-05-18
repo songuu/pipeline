@@ -19,23 +19,32 @@ const simulated_executor_1 = require("./simulated.executor");
 const DEFAULT_BRIDGE_URL = "http://127.0.0.1:5050";
 /**
  * Tekton 执行器：通过 HTTP 调用 services/tekton-bridge (Go) 推进运行。
- * 当 bridge 不可达时退化到 SimulatedExecutor，保证本地 dev 不被中断。
+ * 默认严格失败，避免把真实构建误报成模拟成功；只有显式开启
+ * TEKTON_ALLOW_SIMULATED_FALLBACK=true 才会退化到 SimulatedExecutor。
  */
 let TektonBridgeExecutor = TektonBridgeExecutor_1 = class TektonBridgeExecutor {
     fallback;
     backend = "tekton";
     logger = new common_1.Logger(TektonBridgeExecutor_1.name);
     bridgeUrl = process.env.TEKTON_BRIDGE_URL ?? DEFAULT_BRIDGE_URL;
+    allowSimulatedFallback = process.env.TEKTON_ALLOW_SIMULATED_FALLBACK === "true";
     constructor(fallback) {
         this.fallback = fallback;
     }
     async start(input) {
         try {
+            await this.assertRealTektonBridge();
             const response = await this.post("/v1/runs", input);
-            return { runId: response.runId, backend: this.backend };
+            if (response.backend !== this.backend) {
+                throw new Error(`Tekton bridge returned backend=${response.backend}; expected tekton`);
+            }
+            return response;
         }
         catch (error) {
-            this.logger.warn(`Tekton bridge unreachable, falling back to simulated: ${describe(error)}`);
+            if (!this.allowSimulatedFallback) {
+                throw new Error(`Tekton bridge real execution is unavailable and simulated fallback is disabled: ${describe(error)}`);
+            }
+            this.logger.warn(`Tekton bridge unreachable, falling back to simulated because TEKTON_ALLOW_SIMULATED_FALLBACK=true: ${describe(error)}`);
             return this.fallback.start(input);
         }
     }
@@ -46,6 +55,9 @@ let TektonBridgeExecutor = TektonBridgeExecutor_1 = class TektonBridgeExecutor {
             return await this.get(`/v1/runs/${handle.runId}`);
         }
         catch (error) {
+            if (!this.allowSimulatedFallback) {
+                throw new Error(`Tekton bridge status failed for ${handle.runId}: ${describe(error)}`);
+            }
             this.logger.warn(`status fallback for ${handle.runId}: ${describe(error)}`);
             return this.fallback.status(handle);
         }
@@ -59,6 +71,9 @@ let TektonBridgeExecutor = TektonBridgeExecutor_1 = class TektonBridgeExecutor {
             await this.post(`/v1/runs/${handle.runId}/cancel`, {});
         }
         catch (error) {
+            if (!this.allowSimulatedFallback) {
+                throw new Error(`Tekton bridge cancel failed for ${handle.runId}: ${describe(error)}`);
+            }
             this.logger.warn(`cancel fallback for ${handle.runId}: ${describe(error)}`);
             await this.fallback.cancel(handle);
         }
@@ -99,6 +114,9 @@ let TektonBridgeExecutor = TektonBridgeExecutor_1 = class TektonBridgeExecutor {
             }
         }
         catch (error) {
+            if (!this.allowSimulatedFallback) {
+                throw new Error(`Tekton bridge events failed for ${handle.runId}: ${describe(error)}`);
+            }
             this.logger.warn(`events fallback for ${handle.runId}: ${describe(error)}`);
             for await (const event of this.fallback.events(handle))
                 yield event;
@@ -111,16 +129,23 @@ let TektonBridgeExecutor = TektonBridgeExecutor_1 = class TektonBridgeExecutor {
             body: JSON.stringify(body),
         });
         if (!response.ok) {
-            throw new Error(`bridge ${path} -> ${response.status}`);
+            throw new Error(`bridge ${path} -> ${response.status}: ${await readBridgeError(response)}`);
         }
         return (await response.json());
     }
     async get(path) {
         const response = await fetch(`${this.bridgeUrl}${path}`);
         if (!response.ok) {
-            throw new Error(`bridge ${path} -> ${response.status}`);
+            throw new Error(`bridge ${path} -> ${response.status}: ${await readBridgeError(response)}`);
         }
         return (await response.json());
+    }
+    async assertRealTektonBridge() {
+        const health = await this.get("/healthz");
+        if (health.backend !== this.backend) {
+            throw new Error(`Tekton bridge backend must be tekton for real checkout/build/upload, current backend=${health.backend ?? "unknown"}. ` +
+                "Start services/tekton-bridge with the tekton build tag and TEKTON_BRIDGE_BACKEND=tekton or leave it unset.");
+        }
     }
 };
 exports.TektonBridgeExecutor = TektonBridgeExecutor;
@@ -130,4 +155,20 @@ exports.TektonBridgeExecutor = TektonBridgeExecutor = TektonBridgeExecutor_1 = _
     __metadata("design:paramtypes", [simulated_executor_1.SimulatedExecutor])
 ], TektonBridgeExecutor);
 const describe = (error) => error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+async function readBridgeError(response) {
+    const text = await response.text().catch(() => "");
+    if (!text)
+        return response.statusText;
+    try {
+        const parsed = JSON.parse(text);
+        if (typeof parsed.error === "string")
+            return parsed.error;
+        if (typeof parsed.message === "string")
+            return parsed.message;
+    }
+    catch {
+        return text;
+    }
+    return text;
+}
 //# sourceMappingURL=tekton.executor.js.map

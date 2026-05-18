@@ -1,0 +1,44 @@
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+Error: spawn EPERM
+    at ChildProcess.spawn (node:internal/child_process:421:11)
+    at Object.spawn (node:child_process:796:9)
+    at ensureServiceIsRunning (C:\project\company\deploy-management\node_modules\.pnpm\esbuild@0.27.7\node_modules\esbuild\lib\main.js:2268:29)
+    at startSyncServiceWorker (C:\project\company\deploy-management\node_modules\.pnpm\esbuild@0.27.7\node_modules\esbuild\lib\main.js:2474:19)
+    at Object.<anonymous> (C:\project\company\deploy-management\node_modules\.pnpm\esbuild@0.27.7\node_modules\esbuild\lib\main.js:2515:3)
+    at Module._compile (node:internal/modules/cjs/loader:1761:14)
+    at Object..js (node:internal/modules/cjs/loader:1893:10)
+    at Module.load (node:internal/modules/cjs/loader:1481:32)
+    at Module._load (node:internal/modules/cjs/loader:1300:12)
+    at TracingChannel.traceSync (node:diagnostics_channel:328:14) {
+  errno: -4048,
+  code: 'EPERM',
+  syscall: 'spawn',
+  name: 'TransformError'
+}
+
+Node.js v24.13.0
+
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+Error: spawn EPERM
+    at ChildProcess.spawn (node:internal/child_process:421:11)
+    at Object.spawn (node:child_process:796:9)
+    at ensureServiceIsRunning (C:\project\company\deploy-management\node_modules\.pnpm\esbuild@0.27.7\node_modules\esbuild\lib\main.js:2268:29)
+    at startSyncServiceWorker (C:\project\company\deploy-management\node_modules\.pnpm\esbuild@0.27.7\node_modules\esbuild\lib\main.js:2474:19)
+    at Object.<anonymous> (C:\project\company\deploy-management\node_modules\.pnpm\esbuild@0.27.7\node_modules\esbuild\lib\main.js:2515:3)
+    at Module._compile (node:internal/modules/cjs/loader:1761:14)
+    at Object..js (node:internal/modules/cjs/loader:1893:10)
+    at Module.load (node:internal/modules/cjs/loader:1481:32)
+    at Module._load (node:internal/modules/cjs/loader:1300:12)
+    at TracingChannel.traceSync (node:diagnostics_channel:328:14) {
+  name: 'TransformError',
+  errno: -4048,
+  code: 'EPERM',
+  syscall: 'spawn'
+}
+
+Node.js v24.13.0

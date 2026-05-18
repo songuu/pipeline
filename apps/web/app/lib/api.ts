@@ -1,4 +1,12 @@
-import type { ApiResponse } from "@deploy-management/shared";
+import type {
+  ApiResponse,
+  TektonBridgeCapabilities,
+  TektonPreflightReport,
+  TektonPreflightRequest,
+  StoredRunEvent,
+  TektonTaskRunDetail,
+  TektonTaskRunLogs,
+} from "@deploy-management/shared";
 import { env } from "./env";
 
 export class ApiError extends Error {
@@ -31,7 +39,7 @@ const buildInit = (options: RequestOptions): RequestInit => ({
 export const apiFetch = async <T>(path: string, options: RequestOptions = {}): Promise<T> => {
   const response = await fetch(`${env.apiBase}${path}`, buildInit(options));
   if (!response.ok) {
-    const detail = await response.text().catch(() => "");
+    const detail = await readApiError(response);
     throw new ApiError(detail || response.statusText, response.status);
   }
   return (await response.json()) as T;
@@ -47,3 +55,53 @@ export const yunxiaoFetch = async <T>(path: string, options: RequestOptions = {}
   }
   return envelope.data;
 };
+
+export const fetchTektonCapabilities = (options: RequestOptions = {}): Promise<TektonBridgeCapabilities> =>
+  apiFetch<TektonBridgeCapabilities>("/api/tekton/capabilities", options);
+
+export const runTektonPreflight = (
+  request: TektonPreflightRequest,
+  options: RequestOptions = {},
+): Promise<TektonPreflightReport> =>
+  apiFetch<TektonPreflightReport>("/api/tekton/preflight", {
+    ...options,
+    method: "POST",
+    body: request,
+  });
+
+export const fetchRunEvents = (runId: string, options: RequestOptions = {}): Promise<StoredRunEvent[]> =>
+  apiFetch<StoredRunEvent[]>(`/api/runs/${runId}/events`, options);
+
+export const fetchTektonTaskRunDetail = (
+  runId: string,
+  taskRunName: string,
+  options: RequestOptions = {},
+): Promise<TektonTaskRunDetail> =>
+  apiFetch<TektonTaskRunDetail>(`/api/tekton/runs/${runId}/taskruns/${encodeURIComponent(taskRunName)}`, options);
+
+export const fetchTektonTaskRunLogs = (
+  runId: string,
+  taskRunName: string,
+  stepName?: string,
+  options: RequestOptions = {},
+): Promise<TektonTaskRunLogs> => {
+  const query = stepName ? `?step=${encodeURIComponent(stepName)}` : "";
+  return apiFetch<TektonTaskRunLogs>(
+    `/api/tekton/runs/${runId}/taskruns/${encodeURIComponent(taskRunName)}/logs${query}`,
+    options,
+  );
+};
+
+async function readApiError(response: Response): Promise<string> {
+  const text = await response.text().catch(() => "");
+  if (!text) return response.statusText;
+  try {
+    const parsed = JSON.parse(text) as { message?: unknown; error?: unknown; statusCode?: unknown };
+    if (Array.isArray(parsed.message)) return parsed.message.join("；");
+    if (typeof parsed.message === "string") return parsed.message;
+    if (typeof parsed.error === "string") return parsed.error;
+  } catch {
+    return text;
+  }
+  return text;
+}

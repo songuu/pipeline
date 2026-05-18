@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import type { PlatformSnapshot, TektonControlPlaneSnapshot } from "@deploy-management/shared";
+import { DEFAULT_PIPELINE_BUILD_CONFIG, resolveImageArtifact, type PlatformSnapshot, type TektonControlPlaneSnapshot } from "@deploy-management/shared";
 import { apiFetch } from "./api";
 
 interface SnapshotState {
@@ -13,7 +13,15 @@ interface SnapshotState {
 
 const SnapshotContext = createContext<SnapshotState | null>(null);
 
-type SnapshotPayload = Omit<PlatformSnapshot, "tekton"> & Partial<Pick<PlatformSnapshot, "tekton">>;
+type SnapshotOptionalFields =
+  | "tekton"
+  | "releases"
+  | "deploymentTargets"
+  | "releasePlans"
+  | "releaseExecutions"
+  | "releaseEvents"
+  | "environmentLocks";
+type SnapshotPayload = Omit<PlatformSnapshot, SnapshotOptionalFields> & Partial<Pick<PlatformSnapshot, SnapshotOptionalFields>>;
 const LIVE_RUN_STATUSES = new Set(["queued", "running", "waiting_approval"]);
 
 export function SnapshotProvider({ children }: { children: ReactNode }) {
@@ -51,10 +59,19 @@ export function SnapshotProvider({ children }: { children: ReactNode }) {
 }
 
 function normalizeSnapshot(data: SnapshotPayload): PlatformSnapshot {
-  if (data.tekton) return data as PlatformSnapshot;
-  return {
+  const withReleases = {
     ...data,
-    tekton: createFallbackTekton(data),
+    releases: data.releases ?? [],
+    deploymentTargets: data.deploymentTargets ?? [],
+    releasePlans: data.releasePlans ?? [],
+    releaseExecutions: data.releaseExecutions ?? [],
+    releaseEvents: data.releaseEvents ?? [],
+    environmentLocks: data.environmentLocks ?? [],
+  };
+  if (withReleases.tekton) return withReleases as PlatformSnapshot;
+  return {
+    ...withReleases,
+    tekton: createFallbackTekton(withReleases),
   };
 }
 
@@ -62,6 +79,8 @@ function createFallbackTekton(data: SnapshotPayload): TektonControlPlaneSnapshot
   const bindings = data.pipelines.map((pipeline) => {
     const pipelineName = toKubernetesName(pipeline.name);
     const namespace = pipeline.targetEnvironment === "prod" ? "apps-prod" : `apps-${pipeline.targetEnvironment}`;
+    const image = resolveImageArtifact(pipeline);
+    const buildConfig = pipeline.buildConfig ?? DEFAULT_PIPELINE_BUILD_CONFIG;
     return {
       pipelineId: pipeline.id,
       namespace,
@@ -100,7 +119,7 @@ function createFallbackTekton(data: SnapshotPayload): TektonControlPlaneSnapshot
           name: "docker-config",
           type: "secret" as const,
           mountPath: "/tekton/home/.docker",
-          secretName: "acr-push-secret",
+          secretName: image.dockerConfigSecret || `${toKubernetesName(image.serviceConnection)}-secret`,
           readOnly: true,
           description: "镜像仓库凭据。",
         },
@@ -121,6 +140,17 @@ function createFallbackTekton(data: SnapshotPayload): TektonControlPlaneSnapshot
         { key: "tag-allowlist", value: pipeline.sourcePolicy?.allowedTagPatterns.join(",") ?? "v*" },
         { key: "target-env", value: pipeline.targetEnvironment },
         { key: "canary-percent", value: String(pipeline.canaryPercent) },
+        { key: "REGISTRY_PROVIDER", value: image.registryProvider ?? "custom" },
+        { key: "IMAGE_REGISTRY", value: image.registryUrl },
+        { key: "IMAGE_REPOSITORY", value: image.repository },
+        { key: "IMAGE_REF", value: image.imageRef },
+        { key: "DOCKERFILE_PATH", value: image.dockerfilePath },
+        { key: "BUILD_CONTEXT", value: image.contextPath },
+        { key: "PACKAGE_BUILD_SCRIPT", value: buildConfig.packageBuildScript },
+        { key: "PACKAGE_OUTPUT_PATHS", value: buildConfig.packageOutputPaths.join(",") },
+        { key: "REGISTRY_SERVICE_CONNECTION", value: image.serviceConnection },
+        { key: "REGISTRY_USERNAME", value: image.registryUsername ?? "" },
+        { key: "REGISTRY_DOCKER_SECRET", value: image.dockerConfigSecret ?? "" },
       ],
       taskGraph: pipeline.stages.map((stage, index) => ({
         name: stage,
@@ -163,6 +193,10 @@ function createFallbackTekton(data: SnapshotPayload): TektonControlPlaneSnapshot
       context: "local-dev / fallback",
       executorMode: "simulated",
       namespaces: ["tekton-pipelines", "tekton-triggers", "tekton-results", "tekton-chains"],
+      pipelineRefConfigured: false,
+      sourcePvcConfigured: false,
+      dockerSecretFallbackConfigured: false,
+      simulatedFallbackEnabled: false,
     },
     components: [
       component("Operator", "tekton-operator", "v0.77.0"),

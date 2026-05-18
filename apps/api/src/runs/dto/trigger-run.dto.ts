@@ -20,6 +20,7 @@ const actorSchema = z.string().min(1).max(64).regex(/^[\p{L}\p{N}_.\-@]+$/u, "ac
 
 const refSchema = z.string().min(1).max(255);
 const commitShaSchema = z.string().min(7).max(40).regex(/^[a-f0-9]+$/i, "Commit SHA 必须是 7-40 位十六进制");
+const repositoryAccessTokenSchema = z.string().trim().min(1).max(4096);
 const repositoryUrlSchema = z.string().min(1).max(2048);
 const envKeySchema = z.string().min(1).max(64).regex(/^[A-Z][A-Z0-9_]*$/, "环境变量名必须大写字母+数字+下划线");
 const envValueSchema = z.string().max(4096);
@@ -44,6 +45,7 @@ export const triggerRunSchema = z.object({
   branch: refSchema.optional(),
   tag: refSchema.optional(),
   commitSha: commitShaSchema.optional(),
+  repositoryAccessToken: repositoryAccessTokenSchema.optional(),
   actor: actorSchema.optional(),
   environment: z.enum(["dev", "test", "staging", "prod"]).optional(),
   canaryPercent: z.number().int().min(0).max(100).optional(),

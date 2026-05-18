@@ -12,6 +12,7 @@ import {
 
 interface TemplateModalProps {
   snapshot: PlatformSnapshot;
+  canCreate: boolean;
   selectedTemplateKey: string;
   onSelectTemplate: (key: string) => void;
   activeCategory: string;
@@ -25,6 +26,7 @@ interface TemplateModalProps {
 
 export function TemplateModal({
   snapshot,
+  canCreate,
   selectedTemplateKey,
   onSelectTemplate,
   activeCategory,
@@ -41,7 +43,8 @@ export function TemplateModal({
     visibleTemplates[0] ??
     pipelineTemplates.find((template) => template.key === selectedTemplateKey) ??
     pipelineTemplates[0];
-  const selectedRepository = snapshot.repositories.find((repo) => repo.id === selectedTemplate.repositoryId);
+  const selectedRepository =
+    snapshot.repositories.find((repo) => repo.id === selectedTemplate.repositoryId) ?? snapshot.repositories[0];
 
   const selectCategory = (category: string) => {
     onChangeCategory(category);
@@ -114,14 +117,22 @@ export function TemplateModal({
                     onDoubleClick={() => onSelectTemplate(template.key)}
                   >
                     <div className="template-option-head">
-                      <span className="template-icon">{template.icon}</span>
+                      <span className={`template-icon ${template.language}`}>{template.icon}</span>
                       <span>
                         <strong>{template.title}</strong>
                         <small>{template.subtitle}</small>
                       </span>
                       {template.badge && <em>{template.badge}</em>}
                     </div>
-                    <MiniFlow chips={template.chips} />
+                    <MiniFlow groups={template.flowGroups} />
+                    <div className="template-setting-strip">
+                      {template.settings.slice(0, 3).map((setting) => (
+                        <span key={`${template.key}-${setting.label}`}>
+                          <strong>{setting.label}</strong>
+                          <small>{setting.value}</small>
+                        </span>
+                      ))}
+                    </div>
                   </button>
                 ))
               ) : (
@@ -132,6 +143,12 @@ export function TemplateModal({
               )}
             </div>
             <div className="template-config-preview">
+              {!canCreate && (
+                <div className="template-empty-state">
+                  <strong>可先创建草稿</strong>
+                  <span>创建后进入配置页填写真实应用、代码仓库、分支和 Tag 参数。</span>
+                </div>
+              )}
               <Field label="将创建">
                 <span>
                   {selectedTemplate.title} · {selectedRepository?.url ?? "未绑定仓库"}
@@ -139,7 +156,9 @@ export function TemplateModal({
               </Field>
               <Field label="默认代码源">
                 <span>
-                  {selectedRepository?.provider}/{selectedRepository?.name} · branch/{selectedRepository?.defaultBranch}
+                  {selectedRepository
+                    ? `${selectedRepository.provider}/${selectedRepository.name} · branch/${selectedRepository.defaultBranch}`
+                    : "未接入真实仓库"}
                 </span>
               </Field>
               <Field label="可选 Tag">
@@ -147,6 +166,17 @@ export function TemplateModal({
               </Field>
               <Field label="默认触发">
                 <span>{selectedTemplate.triggers.join(" / ")}</span>
+              </Field>
+              <Field label="构建配置">
+                <span>
+                  {selectedTemplate.buildConfig.packageMode} · {selectedTemplate.buildConfig.packageBuildScript}
+                </span>
+              </Field>
+              <Field label="制品路径">
+                <span>{selectedTemplate.buildConfig.packageOutputPaths.join(" / ")}</span>
+              </Field>
+              <Field label="服务连接">
+                <span>{selectedTemplate.serviceConnections?.join(" / ") || "创建后配置"}</span>
               </Field>
               <Field label="完整生命周期">
                 <span>

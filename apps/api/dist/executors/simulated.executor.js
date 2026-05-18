@@ -37,6 +37,7 @@ let SimulatedExecutor = class SimulatedExecutor {
             ],
         };
         this.records.set(input.pipelineRunId, record);
+        void this.advance(record);
         return { runId: input.pipelineRunId, backend: this.backend };
     }
     async status(handle) {
@@ -109,6 +110,60 @@ let SimulatedExecutor = class SimulatedExecutor {
     reset() {
         this.records.clear();
     }
+    async advance(record) {
+        for (const stage of record.stages) {
+            if (record.canceled)
+                return;
+            const now = new Date().toISOString();
+            stage.status = "RUNNING";
+            stage.jobs = stage.jobs.map((job) => ({
+                ...job,
+                status: "RUNNING",
+                startedAt: now,
+            }));
+            record.events.push({
+                runId: record.runId,
+                type: "stage",
+                timestamp: now,
+                payload: { stageKey: stage.name, status: "RUNNING" },
+            });
+            const durationMs = Math.max(260, Math.floor(stage_templates_1.STAGE_DURATIONS[stage.name] / 100));
+            await sleep(durationMs);
+            if (record.canceled)
+                return;
+            const finishedAt = new Date().toISOString();
+            if (stage.name === "approval" && record.input.requiresApproval) {
+                stage.status = "QUEUED";
+                stage.jobs = stage.jobs.map((job) => ({
+                    ...job,
+                    status: "QUEUED",
+                    finishedAt: undefined,
+                    durationMs: undefined,
+                }));
+                record.events.push({
+                    runId: record.runId,
+                    type: "stage",
+                    timestamp: finishedAt,
+                    payload: { stageKey: stage.name, status: "QUEUED", reason: "awaiting manual approval" },
+                });
+                return;
+            }
+            stage.status = "SUCCESS";
+            stage.jobs = stage.jobs.map((job) => ({
+                ...job,
+                status: "SUCCESS",
+                finishedAt,
+                durationMs,
+            }));
+            record.events.push({
+                runId: record.runId,
+                type: "stage",
+                timestamp: finishedAt,
+                payload: { stageKey: stage.name, status: "SUCCESS" },
+            });
+        }
+        this.markRunFinished(record.runId, "SUCCESS");
+    }
     materializeStages(keys) {
         return keys.map((key, index) => ({
             index,
@@ -151,4 +206,7 @@ exports.SimulatedExecutor = SimulatedExecutor;
 exports.SimulatedExecutor = SimulatedExecutor = __decorate([
     (0, common_1.Injectable)()
 ], SimulatedExecutor);
+function sleep(durationMs) {
+    return new Promise((resolve) => setTimeout(resolve, durationMs));
+}
 //# sourceMappingURL=simulated.executor.js.map

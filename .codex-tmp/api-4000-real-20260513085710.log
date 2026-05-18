@@ -1,0 +1,14 @@
+
+> deploy-management@0.1.0 dev:api C:\project\company\deploy-management
+> pnpm --filter @deploy-management/api dev
+
+
+> @deploy-management/api@0.1.0 dev C:\project\company\deploy-management\apps\api
+> pnpm --filter @deploy-management/shared build && tsx watch src/main.ts
+
+
+> @deploy-management/shared@0.1.0 build C:\project\company\deploy-management\packages\shared
+> tsc -p tsconfig.json
+
+16:55:36 [tsx] change in ./src\main.ts Rerunning...
+c

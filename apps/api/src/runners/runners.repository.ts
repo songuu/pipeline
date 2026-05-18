@@ -6,6 +6,6 @@ import { SEED_RUNNER_POOLS } from "../common/seed-data";
 @Injectable()
 export class RunnersRepository extends InMemoryRepository<RunnerPool> {
   constructor() {
-    super(SEED_RUNNER_POOLS);
+    super(SEED_RUNNER_POOLS, "runner-pools");
   }
 }

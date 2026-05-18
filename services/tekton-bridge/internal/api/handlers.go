@@ -33,6 +33,32 @@ func (h *Handler) Health(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
+// Capabilities GET /v1/capabilities
+func (h *Handler) Capabilities(w http.ResponseWriter, r *http.Request) {
+	capabilities, err := h.backend.Capabilities(r.Context())
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, capabilities)
+}
+
+// Preflight POST /v1/preflight
+func (h *Handler) Preflight(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxCreateRunBodyBytes)
+	var request domain.PreflightRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid JSON: %w", err))
+		return
+	}
+	report, err := h.backend.Preflight(r.Context(), request)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, report)
+}
+
 // maxCreateRunBodyBytes caps StartRunInput payloads at 1 MiB to bound the
 // memory the SimulatedBackend allocates when materializing stages.
 const maxCreateRunBodyBytes = 1 << 20
@@ -80,6 +106,31 @@ func (h *Handler) CancelRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"runId": runID, "status": string(domain.StatusCanceled)})
+}
+
+// GetTaskRun GET /v1/runs/:runId/taskruns/:taskRunName
+func (h *Handler) GetTaskRun(w http.ResponseWriter, r *http.Request) {
+	runID := chi.URLParam(r, "runId")
+	taskRunName := chi.URLParam(r, "taskRunName")
+	detail, err := h.backend.TaskRunDetail(r.Context(), domain.RunHandle{RunID: runID, Backend: h.backend.Name()}, taskRunName)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, detail)
+}
+
+// GetTaskRunLogs GET /v1/runs/:runId/taskruns/:taskRunName/logs?step=name
+func (h *Handler) GetTaskRunLogs(w http.ResponseWriter, r *http.Request) {
+	runID := chi.URLParam(r, "runId")
+	taskRunName := chi.URLParam(r, "taskRunName")
+	stepName := r.URL.Query().Get("step")
+	logs, err := h.backend.TaskRunLogs(r.Context(), domain.RunHandle{RunID: runID, Backend: h.backend.Name()}, taskRunName, stepName)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, logs)
 }
 
 // StreamEvents GET /v1/runs/:runId/events (SSE)

@@ -44,7 +44,12 @@
       "Bash(PORT=4002 node apps/api/dist/main.js)",
       "Bash(PORT=4003 node apps/api/dist/main.js)",
       "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('runs', len\\(d['runs']\\), 'pipelines', len\\(d['pipelines']\\), 'approvals', len\\(d['approvals']\\)\\)\")",
-      "Bash(PORT=4004 pnpm dev:api)"
+      "Bash(PORT=4004 pnpm dev:api)",
+      "Bash(grep -v ':0$')",
+      "Bash(pnpm -r --if-present test)",
+      "Bash(pnpm -r check)",
+      "Bash(pnpm -r build)",
+      "Bash(git stash *)"
     ]
   }
 }

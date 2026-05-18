@@ -6,6 +6,6 @@ import { SEED_APPLICATIONS } from "../common/seed-data";
 @Injectable()
 export class ApplicationsRepository extends InMemoryRepository<Application> {
   constructor() {
-    super(SEED_APPLICATIONS);
+    super(SEED_APPLICATIONS, "applications");
   }
 }

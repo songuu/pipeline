@@ -8,6 +8,8 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.EnvironmentsModule = void 0;
 const common_1 = require("@nestjs/common");
+const deployment_targets_repository_1 = require("./deployment-targets.repository");
+const environment_locks_repository_1 = require("./environment-locks.repository");
 const environments_controller_1 = require("./environments.controller");
 const environments_repository_1 = require("./environments.repository");
 const environments_service_1 = require("./environments.service");
@@ -17,8 +19,8 @@ exports.EnvironmentsModule = EnvironmentsModule;
 exports.EnvironmentsModule = EnvironmentsModule = __decorate([
     (0, common_1.Module)({
         controllers: [environments_controller_1.EnvironmentsController],
-        providers: [environments_service_1.EnvironmentsService, environments_repository_1.EnvironmentsRepository],
-        exports: [environments_service_1.EnvironmentsService, environments_repository_1.EnvironmentsRepository],
+        providers: [environments_service_1.EnvironmentsService, environments_repository_1.EnvironmentsRepository, deployment_targets_repository_1.DeploymentTargetsRepository, environment_locks_repository_1.EnvironmentLocksRepository],
+        exports: [environments_service_1.EnvironmentsService, environments_repository_1.EnvironmentsRepository, deployment_targets_repository_1.DeploymentTargetsRepository, environment_locks_repository_1.EnvironmentLocksRepository],
     })
 ], EnvironmentsModule);
 //# sourceMappingURL=environments.module.js.map

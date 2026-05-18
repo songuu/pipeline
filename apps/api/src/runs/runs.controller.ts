@@ -1,9 +1,11 @@
-import { Body, Controller, Get, Inject, Param, Post } from "@nestjs/common";
+import { Body, Controller, Get, Inject, MessageEvent, Param, Post, Sse } from "@nestjs/common";
+import { Observable } from "rxjs";
 import {
   toPipelineRunInstance,
   type ApiResponse,
   type PipelineRun,
   type PipelineRunInstance,
+  type StoredRunEvent,
 } from "@deploy-management/shared";
 import { ok } from "../common/api-response";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
@@ -40,6 +42,29 @@ export class RunsController {
   @Get("api/runs/:runId/logs")
   legacyLogs(@Param("runId") runId: string): string[] {
     return this.runs.getLogs(runId);
+  }
+
+  @Get("api/runs/:runId/events")
+  legacyEvents(@Param("runId") runId: string): StoredRunEvent[] {
+    return this.runs.getEvents(runId);
+  }
+
+  @Sse("api/runs/:runId/events/stream")
+  streamEvents(@Param("runId") runId: string): Observable<MessageEvent> {
+    this.runs.get(runId);
+    return new Observable<MessageEvent>((subscriber) => {
+      let cursor = 0;
+      const publish = (): void => {
+        const events = this.runs.getEvents(runId);
+        for (const event of events.slice(cursor)) {
+          subscriber.next({ data: event });
+        }
+        cursor = events.length;
+      };
+      publish();
+      const interval = setInterval(publish, 1_000);
+      return () => clearInterval(interval);
+    });
   }
 
   @Post("api/pipelines/:pipelineId/trigger")

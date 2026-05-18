@@ -1,4 +1,4 @@
-import type { LifecycleStageKey, PipelineRun } from "@deploy-management/shared";
+import { DEFAULT_PIPELINE_BUILD_CONFIG, resolveImageArtifact, type LifecycleStageKey, type PipelineRun } from "@deploy-management/shared";
 
 /**
  * 各生命周期阶段的模拟时长（毫秒）。SimulatedExecutor 用其推进 stage。
@@ -25,6 +25,9 @@ export const buildStageLogs = (
   status: "success" | "failed",
 ): string[] => {
   const failed = status === "failed";
+  const image = resolveImageArtifact(run.definitionSnapshot, run);
+  const buildConfig = run.definitionSnapshot.buildConfig ?? DEFAULT_PIPELINE_BUILD_CONFIG;
+  const isGo = buildConfig.runtime === "go";
   const templates: Record<LifecycleStageKey, string[]> = {
     source: [
       `git clone ${run.definitionSnapshot.repository}`,
@@ -34,13 +37,15 @@ export const buildStageLogs = (
       "生成 source snapshot 与变更文件清单。",
     ],
     test: [
-      "恢复依赖缓存。",
-      failed ? "单元测试失败: payment.spec.ts timeout" : "单元测试通过: 284 passed, 0 failed。",
+      isGo ? "恢复 Go module 与 go-build 缓存。" : "恢复依赖缓存。",
+      failed
+        ? isGo ? "Go 单元测试失败: go test ./... 返回错误。" : "单元测试失败: service.spec.ts timeout"
+        : isGo ? "Go 单元测试通过: go test ./...。" : "单元测试通过: 284 passed, 0 failed。",
       failed ? "质量门禁阻止后续构建。" : "SAST 扫描通过，未发现高危漏洞。",
     ],
     build: [
-      "开始构建应用产物。",
-      failed ? "构建失败: Dockerfile 缺少 runtime layer。" : "容器镜像构建完成。",
+      isGo ? "执行 go mod download 与 go build -o bin/application ." : `执行 package.json scripts.${buildConfig.packageBuildScript}。`,
+      failed ? "打包失败: 未生成配置的真实产物目录。" : `打包完成: ${buildConfig.packageOutputPaths.join(" / ")}。`,
     ],
     env: [
       `注入环境变量: NODE_ENV=${run.environment === "prod" ? "production" : run.environment}`,
@@ -52,8 +57,8 @@ export const buildStageLogs = (
       "写入不可变运行快照。",
     ],
     upload: [
-      `推送制品 registry.internal/${run.applicationId}:${run.id}`,
-      "记录 artifact digest sha256:8f31c2d90...",
+      `docker build -f ${image.dockerfilePath} -t ${image.imageRef} ${image.contextPath}`,
+      `docker push ${image.imageRef} 并记录 registry digest。`,
     ],
     deploy: [
       `渲染 ${run.environment} 环境 Helm values。`,

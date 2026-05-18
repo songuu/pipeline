@@ -15,7 +15,9 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.CodeReposController = void 0;
 const common_1 = require("@nestjs/common");
 const api_response_1 = require("../common/api-response");
+const zod_validation_pipe_1 = require("../common/zod-validation.pipe");
 const code_repos_service_1 = require("./code-repos.service");
+const remote_repository_dto_1 = require("./dto/remote-repository.dto");
 let CodeReposController = class CodeReposController {
     service;
     constructor(service) {
@@ -23,6 +25,12 @@ let CodeReposController = class CodeReposController {
     }
     legacyList() {
         return this.service.list();
+    }
+    resolve(body) {
+        return this.service.resolveRemote(body);
+    }
+    refs(body) {
+        return this.service.listRemoteRefs(body);
     }
     list() {
         const items = this.service.list();
@@ -39,6 +47,20 @@ __decorate([
     __metadata("design:paramtypes", []),
     __metadata("design:returntype", Array)
 ], CodeReposController.prototype, "legacyList", null);
+__decorate([
+    (0, common_1.Post)("api/repositories/resolve"),
+    __param(0, (0, common_1.Body)(new zod_validation_pipe_1.ZodValidationPipe(remote_repository_dto_1.resolveRepositorySchema))),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
+], CodeReposController.prototype, "resolve", null);
+__decorate([
+    (0, common_1.Post)("api/repositories/refs"),
+    __param(0, (0, common_1.Body)(new zod_validation_pipe_1.ZodValidationPipe(remote_repository_dto_1.remoteRepositoryRefsSchema))),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
+], CodeReposController.prototype, "refs", null);
 __decorate([
     (0, common_1.Get)("oapi/v1/flow/repositories"),
     __metadata("design:type", Function),

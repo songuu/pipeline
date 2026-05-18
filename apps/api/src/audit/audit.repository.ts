@@ -5,6 +5,6 @@ import { InMemoryRepository } from "../common/in-memory.repository";
 @Injectable()
 export class AuditRepository extends InMemoryRepository<AuditEvent> {
   constructor() {
-    super([]);
+    super([], "audit-events");
   }
 }

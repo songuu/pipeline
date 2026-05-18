@@ -24,12 +24,12 @@ var stageDurations = map[string]time.Duration{
 }
 
 type simulatedRecord struct {
-	mu         sync.Mutex
-	input      domain.StartRunInput
-	stages     []domain.StageInstance
-	startedAt  time.Time
-	finishedAt *time.Time
-	canceled   bool
+	mu          sync.Mutex
+	input       domain.StartRunInput
+	stages      []domain.StageInstance
+	startedAt   time.Time
+	finishedAt  *time.Time
+	canceled    bool
 	subscribers []chan domain.RunEvent
 }
 
@@ -47,6 +47,35 @@ func NewSimulatedBackend() *SimulatedBackend {
 
 // Name implements Backend.
 func (s *SimulatedBackend) Name() domain.Backend { return domain.BackendSimulated }
+
+// Capabilities implements Backend.
+func (s *SimulatedBackend) Capabilities(_ context.Context) (domain.BridgeCapabilities, error) {
+	return simulatedCapabilities(), nil
+}
+
+// Preflight implements Backend.
+func (s *SimulatedBackend) Preflight(_ context.Context, request domain.PreflightRequest) (domain.PreflightReport, error) {
+	capabilities := simulatedCapabilities()
+	namespace := request.Namespace
+	if namespace == "" {
+		namespace = capabilities.Kubernetes.Namespace
+	}
+	checks := []domain.PreflightCheck{
+		{
+			Code:        "backend.real-tekton",
+			Status:      "failed",
+			Message:     "当前 bridge 使用 simulated backend，不能创建真实 Kubernetes PipelineRun",
+			Remediation: "使用 go run -tags tekton ./cmd/server 启动 bridge，并保持 TEKTON_BRIDGE_BACKEND=tekton 或留空。",
+		},
+	}
+	return domain.PreflightReport{
+		OK:           false,
+		Backend:      domain.BackendSimulated,
+		Namespace:    namespace,
+		Checks:       checks,
+		Capabilities: capabilities,
+	}, nil
+}
 
 // Start implements Backend.
 func (s *SimulatedBackend) Start(ctx context.Context, input domain.StartRunInput) (domain.RunHandle, error) {
@@ -163,6 +192,109 @@ func (s *SimulatedBackend) Events(ctx context.Context, handle domain.RunHandle) 
 		record.mu.Unlock()
 	}()
 	return out, nil
+}
+
+// TaskRunDetail implements Backend.
+func (s *SimulatedBackend) TaskRunDetail(_ context.Context, handle domain.RunHandle, taskRunName string) (domain.TaskRunDetail, error) {
+	record, err := s.requireRecord(handle.RunID)
+	if err != nil {
+		return domain.TaskRunDetail{}, err
+	}
+	record.mu.Lock()
+	defer record.mu.Unlock()
+	for _, stage := range record.stages {
+		for _, job := range stage.Jobs {
+			if job.ID != taskRunName {
+				continue
+			}
+			return domain.TaskRunDetail{
+				RunID:            handle.RunID,
+				Namespace:        "simulated",
+				TaskRunName:      job.ID,
+				PipelineTaskName: stage.Name,
+				PodName:          fmt.Sprintf("%s-pod", job.ID),
+				Status:           job.Status,
+				StartedAt:        job.StartedAt,
+				FinishedAt:       job.FinishedAt,
+				Steps:            append([]domain.StepInstance(nil), job.Steps...),
+				Results:          copyStringMap(job.Result),
+				Events: []domain.ObjectEvent{
+					{
+						Type:      "Normal",
+						Reason:    "SimulatedTaskRun",
+						Message:   fmt.Sprintf("Simulated TaskRun %s for stage %s", job.ID, stage.Name),
+						Timestamp: record.startedAt.UTC().Format(time.RFC3339),
+						InvolvedObject: domain.ObjectRef{
+							APIVersion: "tekton.dev/v1",
+							Kind:       "TaskRun",
+							Namespace:  "simulated",
+							Name:       job.ID,
+						},
+					},
+				},
+			}, nil
+		}
+	}
+	return domain.TaskRunDetail{}, fmt.Errorf("TaskRun %s not found for run %s", taskRunName, handle.RunID)
+}
+
+// TaskRunLogs implements Backend.
+func (s *SimulatedBackend) TaskRunLogs(ctx context.Context, handle domain.RunHandle, taskRunName string, stepName string) (domain.TaskRunLogs, error) {
+	detail, err := s.TaskRunDetail(ctx, handle, taskRunName)
+	if err != nil {
+		return domain.TaskRunLogs{}, err
+	}
+	if stepName == "" {
+		stepName = "main"
+	}
+	return domain.TaskRunLogs{
+		RunID:       handle.RunID,
+		Namespace:   detail.Namespace,
+		TaskRunName: detail.TaskRunName,
+		PodName:     detail.PodName,
+		StepName:    stepName,
+		Container:   fmt.Sprintf("step-%s", stepName),
+		Source:      "simulated",
+		Lines: []string{
+			fmt.Sprintf("[simulated] run=%s taskRun=%s step=%s", handle.RunID, taskRunName, stepName),
+			"真实日志需要 tekton backend 通过 Kubernetes pods/log 读取。",
+		},
+		Truncated: false,
+	}, nil
+}
+
+func simulatedCapabilities() domain.BridgeCapabilities {
+	return domain.BridgeCapabilities{
+		Backend: domain.BackendSimulated,
+		Status:  "disconnected",
+		Kubernetes: domain.KubernetesCapabilities{
+			Reachable: false,
+			Namespace: "simulated",
+		},
+		Tekton: domain.TektonCapabilities{
+			PipelinesInstalled: false,
+			TriggersInstalled:  false,
+			ResultsInstalled:   false,
+			ChainsInstalled:    false,
+			Resources:          []string{},
+		},
+		Runtime: domain.RuntimeCapabilities{
+			SourcePVCConfigured:        false,
+			DockerSecretConfigured:     false,
+			ServiceAccountName:         "",
+			BuildStrategy:              "simulated",
+			PrivilegedSidecarRequired:  false,
+			InlinePipelineSpecFallback: false,
+		},
+		Issues: []domain.BridgeIssue{
+			{
+				Severity:    "failed",
+				Code:        "backend.simulated",
+				Message:     "bridge 当前运行在 simulated backend，只能用于本地演示，不能代表真实 Kubernetes/Tekton 控制面。",
+				Remediation: "正式流程请使用 tekton build tag 启动 bridge，并配置 kubeconfig、namespace、PVC、Secret 和 ServiceAccount。",
+			},
+		},
+	}
 }
 
 func (s *SimulatedBackend) advance(runID string, record *simulatedRecord) {
@@ -296,6 +428,17 @@ func copyStages(in []domain.StageInstance) []domain.StageInstance {
 		}
 		stage.Jobs = jobs
 		out[i] = stage
+	}
+	return out
+}
+
+func copyStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return map[string]string{}
+	}
+	out := make(map[string]string, len(in))
+	for key, value := range in {
+		out[key] = value
 	}
 	return out
 }

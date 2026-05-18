@@ -20,6 +20,7 @@ const lifecycleStageEnum = zod_1.z.enum([
 const actorSchema = zod_1.z.string().min(1).max(64).regex(/^[\p{L}\p{N}_.\-@]+$/u, "actor 仅支持字母、数字、_-.@");
 const refSchema = zod_1.z.string().min(1).max(255);
 const commitShaSchema = zod_1.z.string().min(7).max(40).regex(/^[a-f0-9]+$/i, "Commit SHA 必须是 7-40 位十六进制");
+const repositoryAccessTokenSchema = zod_1.z.string().trim().min(1).max(4096);
 const repositoryUrlSchema = zod_1.z.string().min(1).max(2048);
 const envKeySchema = zod_1.z.string().min(1).max(64).regex(/^[A-Z][A-Z0-9_]*$/, "环境变量名必须大写字母+数字+下划线");
 const envValueSchema = zod_1.z.string().max(4096);
@@ -33,6 +34,7 @@ exports.triggerRunSchema = zod_1.z.object({
     branch: refSchema.optional(),
     tag: refSchema.optional(),
     commitSha: commitShaSchema.optional(),
+    repositoryAccessToken: repositoryAccessTokenSchema.optional(),
     actor: actorSchema.optional(),
     environment: zod_1.z.enum(["dev", "test", "staging", "prod"]).optional(),
     canaryPercent: zod_1.z.number().int().min(0).max(100).optional(),

@@ -6,6 +6,6 @@ import { SEED_REPOSITORIES } from "../common/seed-data";
 @Injectable()
 export class CodeReposRepository extends InMemoryRepository<SourceRepository> {
   constructor() {
-    super(SEED_REPOSITORIES);
+    super(SEED_REPOSITORIES, "code-repositories");
   }
 }
