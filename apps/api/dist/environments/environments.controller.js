@@ -15,6 +15,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.EnvironmentsController = void 0;
 const common_1 = require("@nestjs/common");
 const api_response_1 = require("../common/api-response");
+const roles_decorator_1 = require("../security/roles.decorator");
 const environments_service_1 = require("./environments.service");
 let EnvironmentsController = class EnvironmentsController {
     service;
@@ -76,6 +77,7 @@ __decorate([
 ], EnvironmentsController.prototype, "legacyListTargets", null);
 __decorate([
     (0, common_1.Post)("api/deployment-targets"),
+    (0, roles_decorator_1.RequireRoles)("member"),
     __param(0, (0, common_1.Body)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
@@ -89,6 +91,7 @@ __decorate([
 ], EnvironmentsController.prototype, "legacyListLocks", null);
 __decorate([
     (0, common_1.Post)("api/deployment-targets/:targetId/preflight"),
+    (0, roles_decorator_1.RequireRoles)("member"),
     __param(0, (0, common_1.Param)("targetId")),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [String]),
@@ -102,6 +105,7 @@ __decorate([
 ], EnvironmentsController.prototype, "listTargets", null);
 __decorate([
     (0, common_1.Post)("oapi/v1/flow/deployment-targets"),
+    (0, roles_decorator_1.RequireRoles)("member"),
     __param(0, (0, common_1.Body)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
@@ -115,12 +119,14 @@ __decorate([
 ], EnvironmentsController.prototype, "listLocks", null);
 __decorate([
     (0, common_1.Post)("oapi/v1/flow/deployment-targets/:targetId/preflight"),
+    (0, roles_decorator_1.RequireRoles)("member"),
     __param(0, (0, common_1.Param)("targetId")),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [String]),
     __metadata("design:returntype", Object)
 ], EnvironmentsController.prototype, "preflightTarget", null);
 exports.EnvironmentsController = EnvironmentsController = __decorate([
+    (0, roles_decorator_1.RequireRoles)("viewer"),
     (0, common_1.Controller)(),
     __param(0, (0, common_1.Inject)(environments_service_1.EnvironmentsService)),
     __metadata("design:paramtypes", [environments_service_1.EnvironmentsService])

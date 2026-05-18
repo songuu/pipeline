@@ -19,6 +19,7 @@ const shared_1 = require("@deploy-management/shared");
 const api_response_1 = require("../common/api-response");
 const zod_validation_pipe_1 = require("../common/zod-validation.pipe");
 const pipelines_service_1 = require("../pipelines/pipelines.service");
+const roles_decorator_1 = require("../security/roles.decorator");
 const runs_service_1 = require("./runs.service");
 const trigger_run_dto_1 = require("./dto/trigger-run.dto");
 let RunsController = class RunsController {
@@ -56,8 +57,8 @@ let RunsController = class RunsController {
             return () => clearInterval(interval);
         });
     }
-    legacyTrigger(pipelineId, body) {
-        return this.runs.trigger(pipelineId, body);
+    legacyTrigger(pipelineId, body, principal) {
+        return this.runs.trigger(pipelineId, { ...body, actor: body.actor ?? principal.actor });
     }
     legacyCancel(runId) {
         return this.runs.cancel(runId);
@@ -65,8 +66,8 @@ let RunsController = class RunsController {
     legacyPromote(runId) {
         return this.runs.promote(runId);
     }
-    legacyDecideApproval(approvalId, decision, body) {
-        return this.runs.decideApproval(approvalId, decision, body.actor ?? "RO");
+    legacyDecideApproval(approvalId, decision, body, principal) {
+        return this.runs.decideApproval(approvalId, decision, body.actor ?? principal.actor);
     }
     // -------------------------------------------------------------------------
     // Yunxiao 风格 OpenAPI
@@ -86,9 +87,9 @@ let RunsController = class RunsController {
             .map((run) => (0, shared_1.toPipelineRunInstance)(run));
         return (0, api_response_1.ok)(items, { total: items.length });
     }
-    async startRun(pipelineId, params) {
+    async startRun(pipelineId, params, principal) {
         const pipeline = this.pipelines.get(pipelineId);
-        const trigger = this.runs.toTriggerRequest(pipeline, params, "openapi");
+        const trigger = this.runs.toTriggerRequest(pipeline, params, principal.actor);
         const run = await this.runs.trigger(pipelineId, trigger);
         return (0, api_response_1.ok)((0, shared_1.toPipelineRunInstance)(run));
     }
@@ -100,8 +101,8 @@ let RunsController = class RunsController {
         const run = await this.runs.promote(pipelineRunId);
         return (0, api_response_1.ok)((0, shared_1.toPipelineRunInstance)(run));
     }
-    async decideApproval(approvalId, decision, body) {
-        const { run } = await this.runs.decideApproval(approvalId, decision, body.actor ?? "RO");
+    async decideApproval(approvalId, decision, body, principal) {
+        const { run } = await this.runs.decideApproval(approvalId, decision, body.actor ?? principal.actor);
         return (0, api_response_1.ok)((0, shared_1.toPipelineRunInstance)(run));
     }
 };
@@ -142,14 +143,17 @@ __decorate([
 ], RunsController.prototype, "streamEvents", null);
 __decorate([
     (0, common_1.Post)("api/pipelines/:pipelineId/trigger"),
+    (0, roles_decorator_1.RequireRoles)("member"),
     __param(0, (0, common_1.Param)("pipelineId")),
     __param(1, (0, common_1.Body)(new zod_validation_pipe_1.ZodValidationPipe(trigger_run_dto_1.triggerRunSchema))),
+    __param(2, (0, roles_decorator_1.CurrentPrincipal)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String, Object]),
+    __metadata("design:paramtypes", [String, Object, Object]),
     __metadata("design:returntype", Promise)
 ], RunsController.prototype, "legacyTrigger", null);
 __decorate([
     (0, common_1.Post)("api/runs/:runId/cancel"),
+    (0, roles_decorator_1.RequireRoles)("member"),
     __param(0, (0, common_1.Param)("runId")),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [String]),
@@ -157,6 +161,7 @@ __decorate([
 ], RunsController.prototype, "legacyCancel", null);
 __decorate([
     (0, common_1.Post)("api/runs/:runId/promote"),
+    (0, roles_decorator_1.RequireRoles)("member"),
     __param(0, (0, common_1.Param)("runId")),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [String]),
@@ -164,11 +169,13 @@ __decorate([
 ], RunsController.prototype, "legacyPromote", null);
 __decorate([
     (0, common_1.Post)("api/approvals/:approvalId/:decision"),
+    (0, roles_decorator_1.RequireRoles)("member"),
     __param(0, (0, common_1.Param)("approvalId")),
     __param(1, (0, common_1.Param)("decision", new zod_validation_pipe_1.ZodValidationPipe(trigger_run_dto_1.approvalDecisionParamSchema))),
     __param(2, (0, common_1.Body)(new zod_validation_pipe_1.ZodValidationPipe(trigger_run_dto_1.approvalDecisionSchema))),
+    __param(3, (0, roles_decorator_1.CurrentPrincipal)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String, String, Object]),
+    __metadata("design:paramtypes", [String, String, Object, Object]),
     __metadata("design:returntype", Promise)
 ], RunsController.prototype, "legacyDecideApproval", null);
 __decorate([
@@ -193,14 +200,17 @@ __decorate([
 ], RunsController.prototype, "listForPipeline", null);
 __decorate([
     (0, common_1.Post)("oapi/v1/flow/pipelines/:pipelineId/runs"),
+    (0, roles_decorator_1.RequireRoles)("member"),
     __param(0, (0, common_1.Param)("pipelineId")),
     __param(1, (0, common_1.Body)(new zod_validation_pipe_1.ZodValidationPipe(trigger_run_dto_1.startPipelineRunSchema))),
+    __param(2, (0, roles_decorator_1.CurrentPrincipal)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String, Object]),
+    __metadata("design:paramtypes", [String, Object, Object]),
     __metadata("design:returntype", Promise)
 ], RunsController.prototype, "startRun", null);
 __decorate([
     (0, common_1.Post)("oapi/v1/flow/pipelineRuns/:pipelineRunId/cancel"),
+    (0, roles_decorator_1.RequireRoles)("member"),
     __param(0, (0, common_1.Param)("pipelineRunId")),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [String]),
@@ -208,6 +218,7 @@ __decorate([
 ], RunsController.prototype, "cancelRun", null);
 __decorate([
     (0, common_1.Post)("oapi/v1/flow/pipelineRuns/:pipelineRunId/promote"),
+    (0, roles_decorator_1.RequireRoles)("member"),
     __param(0, (0, common_1.Param)("pipelineRunId")),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [String]),
@@ -215,14 +226,17 @@ __decorate([
 ], RunsController.prototype, "promoteRun", null);
 __decorate([
     (0, common_1.Post)("oapi/v1/flow/approvals/:approvalId/:decision"),
+    (0, roles_decorator_1.RequireRoles)("member"),
     __param(0, (0, common_1.Param)("approvalId")),
     __param(1, (0, common_1.Param)("decision", new zod_validation_pipe_1.ZodValidationPipe(trigger_run_dto_1.approvalDecisionParamSchema))),
     __param(2, (0, common_1.Body)(new zod_validation_pipe_1.ZodValidationPipe(trigger_run_dto_1.approvalDecisionSchema))),
+    __param(3, (0, roles_decorator_1.CurrentPrincipal)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String, String, Object]),
+    __metadata("design:paramtypes", [String, String, Object, Object]),
     __metadata("design:returntype", Promise)
 ], RunsController.prototype, "decideApproval", null);
 exports.RunsController = RunsController = __decorate([
+    (0, roles_decorator_1.RequireRoles)("viewer"),
     (0, common_1.Controller)(),
     __param(0, (0, common_1.Inject)(runs_service_1.RunsService)),
     __param(1, (0, common_1.Inject)(pipelines_service_1.PipelinesService)),

@@ -6,8 +6,10 @@ import type {
   TektonTaskRunDetail,
   TektonTaskRunLogs,
 } from "@deploy-management/shared";
+import { RequireRoles } from "../security/roles.decorator";
 import { KubernetesService } from "./kubernetes.service";
 
+@RequireRoles("viewer")
 @Controller()
 export class KubernetesController {
   constructor(@Inject(KubernetesService) private readonly kubernetes: KubernetesService) {}
@@ -23,11 +25,13 @@ export class KubernetesController {
   }
 
   @Post("api/kubernetes/preflight")
+  @RequireRoles("member")
   preflight(@Body() request: TektonPreflightRequest): Promise<TektonPreflightReport> {
     return this.kubernetes.preflight(request ?? {});
   }
 
   @Post("api/tekton/preflight")
+  @RequireRoles("member")
   tektonPreflight(@Body() request: TektonPreflightRequest): Promise<TektonPreflightReport> {
     return this.kubernetes.preflight(request ?? {});
   }

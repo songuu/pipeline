@@ -1,8 +1,10 @@
 import { Controller, Get, Inject } from "@nestjs/common";
 import type { ApiResponse, AuditEvent } from "@deploy-management/shared";
 import { ok } from "../common/api-response";
+import { RequireRoles } from "../security/roles.decorator";
 import { AuditService } from "./audit.service";
 
+@RequireRoles("viewer")
 @Controller()
 export class AuditController {
   constructor(@Inject(AuditService) private readonly service: AuditService) {}

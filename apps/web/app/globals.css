@@ -1,3 +1,5 @@
+@import "@xyflow/react/dist/style.css";
+
 :root {
   --page: #f5f7fa;
   --surface: #ffffff;
@@ -29,6 +31,23 @@ body {
   color: var(--text);
   font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
   font-size: 14px;
+  scrollbar-color: rgba(66, 215, 255, 0.5) rgba(3, 9, 20, 0.74);
+  scrollbar-width: thin;
+}
+
+body::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+body::-webkit-scrollbar-track {
+  background: rgba(3, 9, 20, 0.74);
+}
+
+body::-webkit-scrollbar-thumb {
+  border: 2px solid rgba(3, 9, 20, 0.78);
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(66, 215, 255, 0.92), rgba(20, 184, 166, 0.72));
 }
 
 button,
@@ -2348,6 +2367,89 @@ h2 {
   gap: 34px;
   overflow: auto;
   padding: 18px 32px;
+}
+
+.pipeline-view {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.pipeline-view-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 8px 16px 4px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.pipeline-view-toggle {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--soft);
+}
+
+.pipeline-view-toggle button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.pipeline-view-toggle button:hover {
+  color: var(--text);
+}
+
+.pipeline-view-toggle button.active {
+  background: var(--blue);
+  color: #ffffff;
+}
+
+.pipeline-flow-shell {
+  flex: 1;
+  min-width: 0;
+  min-height: 520px;
+  padding: 12px 16px 16px;
+  overflow: hidden;
+}
+
+.codeup-shell .pipeline-view-toolbar {
+  background: rgba(6, 14, 27, 0.72);
+  border-bottom-color: rgba(66, 215, 255, 0.18);
+}
+
+.codeup-shell .pipeline-view-toggle {
+  background: rgba(3, 9, 20, 0.7);
+  border-color: rgba(66, 215, 255, 0.22);
+}
+
+.codeup-shell .pipeline-view-toggle button {
+  color: rgba(232, 240, 252, 0.65);
+}
+
+.codeup-shell .pipeline-view-toggle button:hover {
+  color: rgba(232, 240, 252, 0.95);
+}
+
+.codeup-shell .pipeline-view-toggle button.active {
+  background: rgba(66, 215, 255, 0.22);
+  color: #e8f7ff;
+}
+
+.codeup-shell .pipeline-flow-shell {
+  background: rgba(6, 14, 27, 0.5);
 }
 
 .stage-column {
@@ -5323,20 +5425,75 @@ button.flow-workspace-card:hover,
 
 /* Sci-fi Yunxiao Flow skin: keep dense Flow IA, add control-room material. */
 .codeup-shell {
+  --trend-bg: #050a12;
+  --trend-bg-soft: #07111f;
+  --trend-surface: rgba(9, 22, 41, 0.74);
+  --trend-surface-strong: rgba(13, 31, 55, 0.88);
+  --trend-surface-muted: rgba(6, 15, 29, 0.68);
+  --trend-line: rgba(125, 197, 255, 0.24);
+  --trend-line-strong: rgba(66, 215, 255, 0.48);
+  --trend-text: #e9f7ff;
+  --trend-muted: #9db4d0;
+  --trend-subtle: #6e89aa;
+  --trend-cyan: #42d7ff;
+  --trend-mint: #12ffd2;
+  --trend-lime: #8efc77;
+  --trend-amber: #fbbf24;
+  --trend-rose: #ff5d8f;
+  position: relative;
+  isolation: isolate;
   min-height: 100vh;
   overflow-x: hidden;
   background:
-    linear-gradient(rgba(69, 205, 255, 0.055) 1px, transparent 1px) 0 0 / 32px 32px,
-    linear-gradient(90deg, rgba(69, 205, 255, 0.045) 1px, transparent 1px) 0 0 / 32px 32px,
-    #07111f;
-  color: #dbeafe;
+    repeating-linear-gradient(0deg, rgba(173, 231, 255, 0.038) 0 1px, transparent 1px 34px),
+    repeating-linear-gradient(90deg, rgba(18, 255, 210, 0.026) 0 1px, transparent 1px 42px),
+    linear-gradient(128deg, rgba(20, 184, 166, 0.16), transparent 38%),
+    linear-gradient(304deg, rgba(251, 191, 36, 0.08), transparent 42%),
+    linear-gradient(180deg, var(--trend-bg-soft), var(--trend-bg));
+  color: var(--trend-text);
+}
+
+.codeup-shell::before,
+.codeup-shell::after {
+  content: "";
+  position: fixed;
+  inset: 50px 0 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.codeup-shell::before {
+  background:
+    linear-gradient(112deg, transparent 0 18%, rgba(66, 215, 255, 0.11) 33%, transparent 48%),
+    linear-gradient(252deg, transparent 0 26%, rgba(18, 255, 210, 0.09) 48%, transparent 62%),
+    conic-gradient(from 148deg at 48% 18%, rgba(66, 215, 255, 0.12), rgba(142, 252, 119, 0.08), rgba(251, 191, 36, 0.07), rgba(66, 215, 255, 0.12));
+  mix-blend-mode: screen;
+  opacity: 0.66;
+  filter: saturate(1.2);
+  animation: trend-veil-pan 18s ease-in-out infinite alternate;
+}
+
+.codeup-shell::after {
+  background:
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.035) 0 1px, transparent 1px 5px),
+    linear-gradient(180deg, rgba(5, 10, 18, 0.05), rgba(5, 10, 18, 0.34));
+  opacity: 0.36;
+  mix-blend-mode: screen;
+}
+
+.codeup-shell .codeup-topbar,
+.codeup-shell .cloud-full-main,
+.codeup-shell .modal-backdrop {
+  position: relative;
+  z-index: 1;
 }
 
 .codeup-shell .codeup-topbar {
-  border-bottom-color: rgba(96, 165, 250, 0.2);
-  background: rgba(7, 17, 31, 0.92);
-  color: #e8f6ff;
-  backdrop-filter: blur(14px);
+  border-bottom-color: var(--trend-line);
+  background: linear-gradient(180deg, rgba(7, 17, 31, 0.9), rgba(6, 15, 29, 0.78));
+  color: var(--trend-text);
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(18px) saturate(1.3);
 }
 
 .codeup-shell .cloud-full-main,
@@ -5383,20 +5540,26 @@ button.flow-workspace-card:hover,
 }
 
 .codeup-shell .flow-sidebar {
-  border-right-color: rgba(96, 165, 250, 0.18);
-  background: rgba(8, 19, 35, 0.9);
+  border-right-color: var(--trend-line);
+  background:
+    linear-gradient(180deg, rgba(66, 215, 255, 0.055), transparent 34%),
+    var(--trend-surface);
+  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.025), 14px 0 40px rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(18px) saturate(1.25);
 }
 
 .codeup-shell .flow-nav-item,
 .codeup-shell .repo-nav-item {
-  color: #9db2ce;
+  color: var(--trend-muted);
 }
 
 .codeup-shell .flow-nav-item.active,
 .codeup-shell .pipeline-config-side button.active {
-  background: linear-gradient(90deg, rgba(20, 184, 166, 0.26), rgba(22, 119, 255, 0.18));
-  color: #e8f6ff;
-  box-shadow: inset 2px 0 0 #42d7ff;
+  background:
+    linear-gradient(90deg, rgba(18, 255, 210, 0.22), rgba(66, 215, 255, 0.15)),
+    rgba(12, 31, 56, 0.68);
+  color: var(--trend-text);
+  box-shadow: inset 2px 0 0 var(--trend-cyan), 0 0 18px rgba(66, 215, 255, 0.12);
 }
 
 .codeup-shell .flow-content,
@@ -5409,7 +5572,7 @@ button.flow-workspace-card:hover,
 .codeup-shell .trigger-panel h2,
 .codeup-shell .variable-panel h2,
 .codeup-shell .run-topline h1 {
-  color: #e8f6ff;
+  color: var(--trend-text);
 }
 
 .codeup-shell .flow-health-card,
@@ -5422,13 +5585,37 @@ button.flow-workspace-card:hover,
 .codeup-shell .pipeline-config-side,
 .codeup-shell .pipeline-config-content,
 .codeup-shell .source-panel {
-  border-color: rgba(96, 165, 250, 0.22);
-  background: rgba(11, 24, 43, 0.88);
-  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.26);
+  border-color: var(--trend-line);
+  background:
+    linear-gradient(135deg, rgba(66, 215, 255, 0.055), transparent 45%),
+    var(--trend-surface);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.024),
+    0 18px 44px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(16px) saturate(1.25);
 }
 
 .codeup-shell .flow-health-card {
-  border-left-color: #42d7ff;
+  position: relative;
+  overflow: hidden;
+  border-left-color: var(--trend-cyan);
+  border-radius: 12px;
+}
+
+.codeup-shell .flow-health-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(110deg, transparent 0 28%, rgba(255, 255, 255, 0.08) 38%, transparent 48%),
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.035) 0 1px, transparent 1px 7px);
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+
+.codeup-shell .flow-health-card:hover::before {
+  opacity: 1;
 }
 
 .codeup-shell .flow-health-card strong,
@@ -5445,7 +5632,7 @@ button.flow-workspace-card:hover,
 .codeup-shell .tekton-run-summary strong,
 .codeup-shell .tekton-metadata-grid strong,
 .codeup-shell .member-row strong {
-  color: #e8f6ff;
+  color: var(--trend-text);
 }
 
 .codeup-shell .flow-health-card span,
@@ -5465,7 +5652,7 @@ button.flow-workspace-card:hover,
 .codeup-shell .task-env-preview em,
 .codeup-shell .source-bound-card span,
 .codeup-shell .source-bound-card small {
-  color: #9db2ce;
+  color: var(--trend-muted);
 }
 
 .codeup-shell .flow-table-head,
@@ -5475,18 +5662,20 @@ button.flow-workspace-card:hover,
 .codeup-shell .pipeline-config-topbar,
 .codeup-shell .task-config-head,
 .codeup-shell .task-step-head {
-  border-color: rgba(96, 165, 250, 0.18);
+  border-color: rgba(125, 197, 255, 0.18);
 }
 
 .codeup-shell .flow-table-row:hover,
 .codeup-shell .flow-table-row.selected,
 .codeup-shell .recent-run.active {
-  background: rgba(22, 119, 255, 0.16);
+  background:
+    linear-gradient(90deg, rgba(66, 215, 255, 0.14), rgba(18, 255, 210, 0.06)),
+    rgba(10, 26, 48, 0.62);
 }
 
 .codeup-shell .recent-run.active {
-  border-color: rgba(66, 215, 255, 0.55);
-  box-shadow: inset 0 0 0 1px rgba(66, 215, 255, 0.12);
+  border-color: rgba(66, 215, 255, 0.62);
+  box-shadow: inset 0 0 0 1px rgba(66, 215, 255, 0.14), 0 0 18px rgba(66, 215, 255, 0.12);
 }
 
 .codeup-shell input,
@@ -5495,28 +5684,31 @@ button.flow-workspace-card:hover,
 .codeup-shell .counted-input,
 .codeup-shell .disabled-copy-input,
 .codeup-shell .webhook-copy-input {
-  border-color: rgba(96, 165, 250, 0.28);
+  border-color: rgba(125, 197, 255, 0.3);
   background: rgba(4, 12, 25, 0.72);
-  color: #e8f6ff;
+  color: var(--trend-text);
 }
 
 .codeup-shell input::placeholder {
-  color: #6f86a6;
+  color: var(--trend-subtle);
 }
 
 .codeup-shell .cloud-secondary,
 .codeup-shell .cloud-icon-button,
 .codeup-shell .plain-icon,
 .codeup-shell .flow-view-tools button {
-  border-color: rgba(96, 165, 250, 0.26);
-  background: rgba(12, 27, 49, 0.86);
+  border-color: rgba(125, 197, 255, 0.28);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent),
+    rgba(12, 27, 49, 0.86);
   color: #dbeafe;
 }
 
 .codeup-shell .yunxiao-primary {
-  border-color: #36c5ff;
-  background: linear-gradient(90deg, #0877ff, #18c6b8);
-  box-shadow: 0 0 20px rgba(24, 198, 184, 0.3);
+  border-color: rgba(66, 215, 255, 0.82);
+  background: linear-gradient(92deg, #0877ff, #18c6b8 58%, #8efc77);
+  color: #f7fdff;
+  box-shadow: 0 0 22px rgba(24, 198, 184, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.24);
 }
 
 .codeup-shell .danger-button {
@@ -5537,16 +5729,19 @@ button.flow-workspace-card:hover,
 
 .codeup-shell .flow-tabs > button.active,
 .codeup-shell .config-top-tabs button.active {
-  border-color: #42d7ff;
-  background: rgba(66, 215, 255, 0.12);
-  color: #e8f6ff;
+  border-color: var(--trend-cyan);
+  background: rgba(66, 215, 255, 0.14);
+  color: var(--trend-text);
+  box-shadow: inset 0 -1px 0 rgba(18, 255, 210, 0.24);
 }
 
 .codeup-shell .flow-config-main,
 .codeup-shell .flow-config-board,
 .codeup-shell .run-canvas,
 .codeup-shell .pipeline-board {
-  background: rgba(6, 14, 27, 0.72);
+  background:
+    linear-gradient(120deg, rgba(66, 215, 255, 0.045), transparent 44%),
+    rgba(6, 14, 27, 0.72);
 }
 
 .codeup-shell .tekton-binding-strip,
@@ -5576,8 +5771,10 @@ button.flow-workspace-card:hover,
 .codeup-shell .tekton-param-strip span,
 .codeup-shell .variable-editor-grid,
 .codeup-shell .variable-table {
-  border-color: rgba(96, 165, 250, 0.22);
-  background: rgba(10, 26, 48, 0.86);
+  border-color: rgba(125, 197, 255, 0.22);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.028), transparent 42%),
+    rgba(10, 26, 48, 0.82);
   color: #dbeafe;
 }
 
@@ -5632,8 +5829,10 @@ button.flow-workspace-card:hover,
 }
 
 .codeup-shell .job-card {
-  border-color: rgba(96, 165, 250, 0.22);
-  background: rgba(11, 24, 43, 0.9);
+  border-color: rgba(125, 197, 255, 0.24);
+  background:
+    linear-gradient(135deg, rgba(66, 215, 255, 0.075), transparent 54%),
+    rgba(11, 24, 43, 0.88);
 }
 
 .codeup-shell .config-section-bar {
@@ -6039,19 +6238,29 @@ button.flow-workspace-card:hover,
 .codeup-shell .template-category-nav,
 .codeup-shell .template-picker,
 .codeup-shell .template-modal-footer {
-  border-color: #e5e9ef;
-  background: #fff;
+  border-color: rgba(125, 197, 255, 0.2);
+  background:
+    linear-gradient(180deg, rgba(66, 215, 255, 0.055), transparent 44%),
+    rgba(8, 19, 35, 0.9);
 }
 
 .codeup-shell .template-category-nav {
-  background: #fafafa;
+  background:
+    linear-gradient(180deg, rgba(18, 255, 210, 0.04), transparent 48%),
+    rgba(7, 18, 34, 0.92);
 }
 
 .codeup-shell .template-modal {
-  border-color: #dfe5ec;
-  background: #fff;
-  color: #111827;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.28);
+  border-color: rgba(125, 197, 255, 0.28);
+  background:
+    linear-gradient(128deg, rgba(66, 215, 255, 0.1), transparent 38%),
+    linear-gradient(304deg, rgba(18, 255, 210, 0.06), transparent 44%),
+    rgba(6, 15, 29, 0.96);
+  color: var(--trend-text);
+  box-shadow:
+    0 28px 80px rgba(0, 0, 0, 0.42),
+    0 0 38px rgba(66, 215, 255, 0.12);
+  backdrop-filter: blur(18px) saturate(1.25);
 }
 
 .codeup-shell .create-mode-card,
@@ -6059,27 +6268,29 @@ button.flow-workspace-card:hover,
 .codeup-shell .template-empty-state,
 .codeup-shell .template-config-preview .field,
 .codeup-shell .mini-flow-group i {
-  border-color: #d9e1ea;
-  background: #fff;
-  color: #4b5563;
+  border-color: rgba(125, 197, 255, 0.22);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.035), transparent 48%),
+    rgba(9, 21, 38, 0.84);
+  color: #dbeafe;
 }
 
 .codeup-shell .create-mode-card.active,
 .codeup-shell .template-option.selected,
 .codeup-shell .template-option:hover,
 .codeup-shell .mini-flow-group i:hover {
-  border-color: #1683ff;
-  box-shadow: 0 0 0 1px rgba(22, 131, 255, 0.14);
+  border-color: rgba(66, 215, 255, 0.7);
+  box-shadow: 0 0 0 1px rgba(66, 215, 255, 0.14), 0 0 20px rgba(66, 215, 255, 0.12);
 }
 
 .codeup-shell .template-category-nav button {
-  color: #4b5563;
+  color: var(--trend-muted);
 }
 
 .codeup-shell .template-category-nav button.active {
-  border-right-color: #096dd9;
-  background: #e7f4ff;
-  color: #111827;
+  border-right-color: var(--trend-cyan);
+  background: linear-gradient(90deg, rgba(66, 215, 255, 0.18), rgba(18, 255, 210, 0.06));
+  color: var(--trend-text);
 }
 
 .codeup-shell .create-mode-row > span,
@@ -6088,7 +6299,7 @@ button.flow-workspace-card:hover,
 .codeup-shell .template-option-head strong,
 .codeup-shell .template-config-preview .field > span:last-child,
 .codeup-shell .template-setting-strip small {
-  color: #111827;
+  color: var(--trend-text);
 }
 
 .codeup-shell .custom-template-note,
@@ -6096,12 +6307,13 @@ button.flow-workspace-card:hover,
 .codeup-shell .template-empty-state,
 .codeup-shell .template-config-preview .field > span:first-child,
 .codeup-shell .template-setting-strip strong {
-  color: #667085;
+  color: var(--trend-muted);
 }
 
 .codeup-shell .template-option-head em {
-  background: #e7f3ff;
-  color: #006bd6;
+  border: 1px solid rgba(66, 215, 255, 0.32);
+  background: rgba(66, 215, 255, 0.12);
+  color: #a5f3fc;
 }
 
 .source-summary-button {
@@ -6205,11 +6417,15 @@ button.flow-workspace-card:hover,
   grid-template-columns: minmax(200px, 230px) minmax(260px, 1fr) minmax(300px, max-content) minmax(170px, 210px);
   align-items: center;
   gap: 18px;
-  border-color: rgba(66, 215, 255, 0.22);
-  border-radius: 9px;
+  border-color: rgba(125, 197, 255, 0.24);
+  border-radius: 12px;
+  background:
+    linear-gradient(110deg, rgba(66, 215, 255, 0.08), transparent 42%),
+    rgba(10, 24, 44, 0.64);
   box-shadow:
     inset 0 0 0 1px rgba(255, 255, 255, 0.025),
-    0 18px 42px rgba(0, 0, 0, 0.22);
+    0 18px 48px rgba(0, 0, 0, 0.24);
+  backdrop-filter: blur(14px) saturate(1.2);
 }
 
 .codeup-shell .run-status-line > div:first-child {
@@ -6239,9 +6455,11 @@ button.flow-workspace-card:hover,
   min-height: 570px;
   grid-template-columns: 250px minmax(0, 1fr) 360px;
   overflow: hidden;
-  border-color: rgba(66, 215, 255, 0.24);
-  border-radius: 10px;
-  box-shadow: 0 22px 58px rgba(0, 0, 0, 0.22);
+  border-color: rgba(66, 215, 255, 0.3);
+  border-radius: 14px;
+  box-shadow:
+    0 28px 70px rgba(0, 0, 0, 0.28),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.024);
 }
 
 .codeup-shell .run-canvas.source-collapsed {
@@ -6280,6 +6498,10 @@ button.flow-workspace-card:hover,
   padding: 22px 24px;
 }
 
+.codeup-shell .flow-health-strip {
+  grid-template-columns: minmax(1.22fr, 1.22fr) minmax(0, 1fr) minmax(0, 1.05fr) minmax(0, 0.96fr);
+}
+
 .codeup-shell .stage-column {
   min-height: 420px;
 }
@@ -6300,10 +6522,11 @@ button.flow-workspace-card:hover,
 
 .codeup-shell .job-card {
   min-height: 104px;
-  border-radius: 9px;
+  border-radius: 11px;
   background:
-    linear-gradient(135deg, rgba(66, 215, 255, 0.055), transparent 54%),
-    rgba(11, 24, 43, 0.92);
+    linear-gradient(135deg, rgba(66, 215, 255, 0.075), transparent 54%),
+    linear-gradient(315deg, rgba(142, 252, 119, 0.04), transparent 48%),
+    rgba(11, 24, 43, 0.9);
   box-shadow:
     inset 0 0 0 1px rgba(255, 255, 255, 0.025),
     0 12px 28px rgba(0, 0, 0, 0.16);
@@ -6326,6 +6549,7 @@ button.flow-workspace-card:hover,
   border-left-color: rgba(66, 215, 255, 0.2);
   background:
     linear-gradient(180deg, rgba(66, 215, 255, 0.065), transparent 34%),
+    linear-gradient(310deg, rgba(251, 191, 36, 0.035), transparent 52%),
     rgba(9, 21, 38, 0.92);
   padding: 18px 18px 24px;
 }
@@ -6809,6 +7033,41 @@ button.flow-workspace-card:hover,
 
   100% {
     transform: translateX(115%);
+  }
+}
+
+@keyframes trend-veil-pan {
+  0% {
+    transform: translate3d(-1%, -0.8%, 0) scale(1);
+    opacity: 0.56;
+  }
+
+  50% {
+    transform: translate3d(1.4%, 0.6%, 0) scale(1.015);
+    opacity: 0.72;
+  }
+
+  100% {
+    transform: translate3d(-0.4%, 1%, 0) scale(1.01);
+    opacity: 0.62;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .codeup-shell::before,
+  .codeup-shell .run-detail-page::before,
+  .codeup-shell .run-detail-page::after,
+  .primary-artifact-card::before,
+  .primary-artifact-card::after,
+  .run-live-progress i::after,
+  .job-card.running::after {
+    animation: none;
+  }
+
+  .codeup-shell button,
+  .codeup-shell .flow-health-card::before,
+  .run-live-progress i {
+    transition: none;
   }
 }
 
@@ -7591,6 +7850,172 @@ button.flow-workspace-card:hover,
   color: #8fb6d8;
   font-style: normal;
   font-size: 11px;
+}
+
+/* Run detail polish: command previews stay compact while the right panel owns full logs. */
+.codeup-shell .run-detail-page {
+  padding-right: 34px;
+}
+
+.codeup-shell .source-panel,
+.codeup-shell .pipeline-board,
+.codeup-shell .tekton-run-panel,
+.codeup-shell .execution-command-main > code,
+.codeup-shell .execution-command-detail-list,
+.codeup-shell .execution-command-detail-list code,
+.codeup-shell .execution-command-output,
+.codeup-shell .execution-script-card pre,
+.codeup-shell .job-command-preview,
+.codeup-shell .job-command-line code {
+  scrollbar-color: rgba(66, 215, 255, 0.48) rgba(3, 9, 20, 0.66);
+  scrollbar-width: thin;
+}
+
+.codeup-shell .source-panel::-webkit-scrollbar,
+.codeup-shell .pipeline-board::-webkit-scrollbar,
+.codeup-shell .tekton-run-panel::-webkit-scrollbar,
+.codeup-shell .execution-command-main > code::-webkit-scrollbar,
+.codeup-shell .execution-command-detail-list::-webkit-scrollbar,
+.codeup-shell .execution-command-detail-list code::-webkit-scrollbar,
+.codeup-shell .execution-command-output::-webkit-scrollbar,
+.codeup-shell .execution-script-card pre::-webkit-scrollbar,
+.codeup-shell .job-command-preview::-webkit-scrollbar,
+.codeup-shell .job-command-line code::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.codeup-shell .source-panel::-webkit-scrollbar-track,
+.codeup-shell .pipeline-board::-webkit-scrollbar-track,
+.codeup-shell .tekton-run-panel::-webkit-scrollbar-track,
+.codeup-shell .execution-command-main > code::-webkit-scrollbar-track,
+.codeup-shell .execution-command-detail-list::-webkit-scrollbar-track,
+.codeup-shell .execution-command-detail-list code::-webkit-scrollbar-track,
+.codeup-shell .execution-command-output::-webkit-scrollbar-track,
+.codeup-shell .execution-script-card pre::-webkit-scrollbar-track,
+.codeup-shell .job-command-preview::-webkit-scrollbar-track,
+.codeup-shell .job-command-line code::-webkit-scrollbar-track {
+  border-radius: 999px;
+  background: rgba(3, 9, 20, 0.68);
+}
+
+.codeup-shell .source-panel::-webkit-scrollbar-thumb,
+.codeup-shell .pipeline-board::-webkit-scrollbar-thumb,
+.codeup-shell .tekton-run-panel::-webkit-scrollbar-thumb,
+.codeup-shell .execution-command-main > code::-webkit-scrollbar-thumb,
+.codeup-shell .execution-command-detail-list::-webkit-scrollbar-thumb,
+.codeup-shell .execution-command-detail-list code::-webkit-scrollbar-thumb,
+.codeup-shell .execution-command-output::-webkit-scrollbar-thumb,
+.codeup-shell .execution-script-card pre::-webkit-scrollbar-thumb,
+.codeup-shell .job-command-preview::-webkit-scrollbar-thumb,
+.codeup-shell .job-command-line code::-webkit-scrollbar-thumb {
+  border: 2px solid rgba(3, 9, 20, 0.72);
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(66, 215, 255, 0.88), rgba(20, 184, 166, 0.72));
+}
+
+.codeup-shell .tekton-run-panel {
+  padding-right: 28px;
+}
+
+.codeup-shell .execution-process-panel {
+  min-width: 0;
+}
+
+.codeup-shell .execution-process-panel header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+}
+
+.codeup-shell .execution-process-panel header .artifact-copy-button {
+  flex: 0 0 auto;
+  justify-self: start;
+  max-width: 100%;
+}
+
+.codeup-shell .execution-command-list {
+  gap: 10px;
+}
+
+.codeup-shell .execution-command-row {
+  grid-template-columns: 38px minmax(0, 1fr) 30px;
+  gap: 9px;
+  padding: 9px;
+}
+
+.codeup-shell .execution-command-main > code {
+  max-height: 92px;
+}
+
+.codeup-shell .execution-command-detail-list {
+  max-height: 230px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.codeup-shell .execution-command-detail-list span {
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 6px 8px;
+}
+
+.codeup-shell .execution-command-detail-list small,
+.codeup-shell .execution-command-detail-list code {
+  grid-column: 2 / -1;
+}
+
+.codeup-shell .execution-command-detail-list code {
+  max-height: 86px;
+}
+
+.codeup-shell .job-command-preview {
+  max-height: 172px;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
+.codeup-shell .job-command-line {
+  gap: 4px;
+}
+
+.codeup-shell .job-command-line code {
+  display: -webkit-box;
+  max-height: none;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.codeup-shell .primary-artifact-card,
+.codeup-shell .tekton-artifact-list,
+.codeup-shell .tekton-runtime-section,
+.codeup-shell .artifact-output-card {
+  min-width: 0;
+}
+
+.codeup-shell .primary-artifact-card em,
+.codeup-shell .artifact-output-card em {
+  line-height: 1.5;
+}
+
+.codeup-shell .artifact-output-card > div {
+  align-items: flex-start;
+}
+
+.codeup-shell .artifact-output-card strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codeup-shell .artifact-copy-button {
+  flex: 0 0 auto;
+}
+
+.codeup-shell .artifact-copy-button.primary,
+.codeup-shell .artifact-copy-button.ghost {
+  width: 100%;
 }
 
 @media (max-width: 980px) {

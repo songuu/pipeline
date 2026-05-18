@@ -10,6 +10,8 @@ import {
 import { ok } from "../common/api-response";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { PipelinesService } from "../pipelines/pipelines.service";
+import { CurrentPrincipal, RequireRoles } from "../security/roles.decorator";
+import type { ControlPlanePrincipal } from "../security/security.types";
 import { RunsService } from "./runs.service";
 import {
   approvalDecisionParamSchema,
@@ -22,6 +24,7 @@ import {
   type TriggerRunDto,
 } from "./dto/trigger-run.dto";
 
+@RequireRoles("viewer")
 @Controller()
 export class RunsController {
   constructor(
@@ -68,30 +71,36 @@ export class RunsController {
   }
 
   @Post("api/pipelines/:pipelineId/trigger")
+  @RequireRoles("member")
   legacyTrigger(
     @Param("pipelineId") pipelineId: string,
     @Body(new ZodValidationPipe(triggerRunSchema)) body: TriggerRunDto,
+    @CurrentPrincipal() principal: ControlPlanePrincipal,
   ): Promise<PipelineRun> {
-    return this.runs.trigger(pipelineId, body);
+    return this.runs.trigger(pipelineId, { ...body, actor: body.actor ?? principal.actor });
   }
 
   @Post("api/runs/:runId/cancel")
+  @RequireRoles("member")
   legacyCancel(@Param("runId") runId: string): Promise<PipelineRun> {
     return this.runs.cancel(runId);
   }
 
   @Post("api/runs/:runId/promote")
+  @RequireRoles("member")
   legacyPromote(@Param("runId") runId: string): Promise<PipelineRun> {
     return this.runs.promote(runId);
   }
 
   @Post("api/approvals/:approvalId/:decision")
+  @RequireRoles("member")
   legacyDecideApproval(
     @Param("approvalId") approvalId: string,
     @Param("decision", new ZodValidationPipe(approvalDecisionParamSchema)) decision: ApprovalDecisionParam,
     @Body(new ZodValidationPipe(approvalDecisionSchema)) body: ApprovalDecisionDto,
+    @CurrentPrincipal() principal: ControlPlanePrincipal,
   ): Promise<{ approval: unknown; run: PipelineRun }> {
-    return this.runs.decideApproval(approvalId, decision, body.actor ?? "RO");
+    return this.runs.decideApproval(approvalId, decision, body.actor ?? principal.actor);
   }
 
   // -------------------------------------------------------------------------
@@ -120,17 +129,20 @@ export class RunsController {
   }
 
   @Post("oapi/v1/flow/pipelines/:pipelineId/runs")
+  @RequireRoles("member")
   async startRun(
     @Param("pipelineId") pipelineId: string,
     @Body(new ZodValidationPipe(startPipelineRunSchema)) params: StartPipelineRunDto,
+    @CurrentPrincipal() principal: ControlPlanePrincipal,
   ): Promise<ApiResponse<PipelineRunInstance>> {
     const pipeline = this.pipelines.get(pipelineId);
-    const trigger = this.runs.toTriggerRequest(pipeline, params, "openapi");
+    const trigger = this.runs.toTriggerRequest(pipeline, params, principal.actor);
     const run = await this.runs.trigger(pipelineId, trigger);
     return ok(toPipelineRunInstance(run));
   }
 
   @Post("oapi/v1/flow/pipelineRuns/:pipelineRunId/cancel")
+  @RequireRoles("member")
   async cancelRun(
     @Param("pipelineRunId") pipelineRunId: string,
   ): Promise<ApiResponse<PipelineRunInstance>> {
@@ -139,6 +151,7 @@ export class RunsController {
   }
 
   @Post("oapi/v1/flow/pipelineRuns/:pipelineRunId/promote")
+  @RequireRoles("member")
   async promoteRun(
     @Param("pipelineRunId") pipelineRunId: string,
   ): Promise<ApiResponse<PipelineRunInstance>> {
@@ -147,12 +160,14 @@ export class RunsController {
   }
 
   @Post("oapi/v1/flow/approvals/:approvalId/:decision")
+  @RequireRoles("member")
   async decideApproval(
     @Param("approvalId") approvalId: string,
     @Param("decision", new ZodValidationPipe(approvalDecisionParamSchema)) decision: ApprovalDecisionParam,
     @Body(new ZodValidationPipe(approvalDecisionSchema)) body: ApprovalDecisionDto,
+    @CurrentPrincipal() principal: ControlPlanePrincipal,
   ): Promise<ApiResponse<PipelineRunInstance>> {
-    const { run } = await this.runs.decideApproval(approvalId, decision, body.actor ?? "RO");
+    const { run } = await this.runs.decideApproval(approvalId, decision, body.actor ?? principal.actor);
     return ok(toPipelineRunInstance(run));
   }
 }

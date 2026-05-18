@@ -17,6 +17,7 @@ const common_1 = require("@nestjs/common");
 const api_response_1 = require("../common/api-response");
 const zod_validation_pipe_1 = require("../common/zod-validation.pipe");
 const audit_service_1 = require("../audit/audit.service");
+const roles_decorator_1 = require("../security/roles.decorator");
 const pipelines_service_1 = require("./pipelines.service");
 const create_pipeline_dto_1 = require("./dto/create-pipeline.dto");
 let PipelinesController = class PipelinesController {
@@ -29,19 +30,19 @@ let PipelinesController = class PipelinesController {
     legacyList() {
         return this.service.list();
     }
-    async legacyCreate(body) {
+    async legacyCreate(body, principal) {
         const pipeline = await this.service.create(body);
-        await this.audit.record(body.owner || "RO", "create_pipeline", pipeline.id);
+        await this.audit.record(body.owner || principal.actor, "create_pipeline", pipeline.id);
         return pipeline;
     }
-    async legacyUpdate(id, body) {
+    async legacyUpdate(id, body, principal) {
         const pipeline = await this.service.update(id, body);
-        await this.audit.record(body.owner || "RO", "update_pipeline", pipeline.id);
+        await this.audit.record(body.owner || principal.actor, "update_pipeline", pipeline.id);
         return pipeline;
     }
-    async legacyDelete(id) {
+    async legacyDelete(id, principal) {
         const deleted = await this.service.delete(id);
-        await this.audit.record("RO", "delete_pipeline", id);
+        await this.audit.record(principal.actor, "delete_pipeline", id);
         return deleted;
     }
     list() {
@@ -51,19 +52,19 @@ let PipelinesController = class PipelinesController {
     get(id) {
         return (0, api_response_1.ok)(this.service.get(id));
     }
-    async create(body) {
+    async create(body, principal) {
         const pipeline = await this.service.create(body);
-        await this.audit.record(body.owner || "RO", "create_pipeline", pipeline.id);
+        await this.audit.record(body.owner || principal.actor, "create_pipeline", pipeline.id);
         return (0, api_response_1.ok)(pipeline);
     }
-    async update(id, body) {
+    async update(id, body, principal) {
         const pipeline = await this.service.update(id, body);
-        await this.audit.record(body.owner || "RO", "update_pipeline", pipeline.id);
+        await this.audit.record(body.owner || principal.actor, "update_pipeline", pipeline.id);
         return (0, api_response_1.ok)(pipeline);
     }
-    async delete(id) {
+    async delete(id, principal) {
         const deleted = await this.service.delete(id);
-        await this.audit.record("RO", "delete_pipeline", id);
+        await this.audit.record(principal.actor, "delete_pipeline", id);
         return (0, api_response_1.ok)(deleted);
     }
 };
@@ -76,24 +77,30 @@ __decorate([
 ], PipelinesController.prototype, "legacyList", null);
 __decorate([
     (0, common_1.Post)("api/pipelines"),
+    (0, roles_decorator_1.RequireRoles)("member"),
     __param(0, (0, common_1.Body)(new zod_validation_pipe_1.ZodValidationPipe(create_pipeline_dto_1.createPipelineSchema))),
+    __param(1, (0, roles_decorator_1.CurrentPrincipal)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object]),
+    __metadata("design:paramtypes", [Object, Object]),
     __metadata("design:returntype", Promise)
 ], PipelinesController.prototype, "legacyCreate", null);
 __decorate([
     (0, common_1.Put)("api/pipelines/:id"),
+    (0, roles_decorator_1.RequireRoles)("member"),
     __param(0, (0, common_1.Param)("id")),
     __param(1, (0, common_1.Body)(new zod_validation_pipe_1.ZodValidationPipe(create_pipeline_dto_1.updatePipelineSchema))),
+    __param(2, (0, roles_decorator_1.CurrentPrincipal)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String, Object]),
+    __metadata("design:paramtypes", [String, Object, Object]),
     __metadata("design:returntype", Promise)
 ], PipelinesController.prototype, "legacyUpdate", null);
 __decorate([
     (0, common_1.Delete)("api/pipelines/:id"),
+    (0, roles_decorator_1.RequireRoles)("admin"),
     __param(0, (0, common_1.Param)("id")),
+    __param(1, (0, roles_decorator_1.CurrentPrincipal)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String]),
+    __metadata("design:paramtypes", [String, Object]),
     __metadata("design:returntype", Promise)
 ], PipelinesController.prototype, "legacyDelete", null);
 __decorate([
@@ -111,27 +118,34 @@ __decorate([
 ], PipelinesController.prototype, "get", null);
 __decorate([
     (0, common_1.Post)("oapi/v1/flow/pipelines"),
+    (0, roles_decorator_1.RequireRoles)("member"),
     __param(0, (0, common_1.Body)(new zod_validation_pipe_1.ZodValidationPipe(create_pipeline_dto_1.createPipelineSchema))),
+    __param(1, (0, roles_decorator_1.CurrentPrincipal)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object]),
+    __metadata("design:paramtypes", [Object, Object]),
     __metadata("design:returntype", Promise)
 ], PipelinesController.prototype, "create", null);
 __decorate([
     (0, common_1.Put)("oapi/v1/flow/pipelines/:id"),
+    (0, roles_decorator_1.RequireRoles)("member"),
     __param(0, (0, common_1.Param)("id")),
     __param(1, (0, common_1.Body)(new zod_validation_pipe_1.ZodValidationPipe(create_pipeline_dto_1.updatePipelineSchema))),
+    __param(2, (0, roles_decorator_1.CurrentPrincipal)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String, Object]),
+    __metadata("design:paramtypes", [String, Object, Object]),
     __metadata("design:returntype", Promise)
 ], PipelinesController.prototype, "update", null);
 __decorate([
     (0, common_1.Delete)("oapi/v1/flow/pipelines/:id"),
+    (0, roles_decorator_1.RequireRoles)("admin"),
     __param(0, (0, common_1.Param)("id")),
+    __param(1, (0, roles_decorator_1.CurrentPrincipal)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String]),
+    __metadata("design:paramtypes", [String, Object]),
     __metadata("design:returntype", Promise)
 ], PipelinesController.prototype, "delete", null);
 exports.PipelinesController = PipelinesController = __decorate([
+    (0, roles_decorator_1.RequireRoles)("viewer"),
     (0, common_1.Controller)(),
     __param(0, (0, common_1.Inject)(pipelines_service_1.PipelinesService)),
     __param(1, (0, common_1.Inject)(audit_service_1.AuditService)),

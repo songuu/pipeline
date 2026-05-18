@@ -31,6 +31,7 @@ declare
     'dm_release_executions',
     'dm_release_events',
     'dm_approvals',
+    'dm_webhook_deliveries',
     'dm_audit_events',
     'dm_environments',
     'dm_runner_pools'
@@ -112,6 +113,7 @@ begin
     when 'dm_release_executions' then p_table
     when 'dm_release_events' then p_table
     when 'dm_approvals' then p_table
+    when 'dm_webhook_deliveries' then p_table
     when 'dm_audit_events' then p_table
     when 'dm_environments' then p_table
     when 'dm_runner_pools' then p_table
@@ -213,6 +215,12 @@ create index if not exists dm_release_events_run_idx
 
 create index if not exists dm_approvals_run_status_idx
   on public.dm_approvals ((payload ->> 'runId'), (payload ->> 'status'), (payload ->> 'environment'));
+
+create index if not exists dm_webhook_deliveries_dedupe_idx
+  on public.dm_webhook_deliveries ((payload ->> 'provider'), (payload ->> 'pipelineId'), (payload ->> 'deliveryId'));
+
+create index if not exists dm_webhook_deliveries_expires_idx
+  on public.dm_webhook_deliveries ((payload ->> 'expiresAt'));
 
 create index if not exists dm_audit_events_actor_action_idx
   on public.dm_audit_events ((payload ->> 'actor'), (payload ->> 'action'), (payload ->> 'createdAt'));

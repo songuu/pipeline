@@ -49,7 +49,18 @@
       "Bash(pnpm -r --if-present test)",
       "Bash(pnpm -r check)",
       "Bash(pnpm -r build)",
-      "Bash(git stash *)"
+      "Bash(git stash *)",
+      "Bash(grep -E \"\\\\.\\(ts|json\\)$\")",
+      "Bash(xargs grep -l \"RBAC\\\\|ServiceAccount\\\\|RoleBinding\\\\|authorization\\\\|role\")",
+      "Bash(xargs grep -l \"canary\\\\|gray\\\\|release\")",
+      "Bash(xargs grep -l \"table\\\\|supabase\\\\|persist\\\\|migration\")",
+      "Bash(xargs grep -l \"decid\\\\|approval\\\\|actor\\\\|permission\\\\|scope\")",
+      "Bash(pnpm --filter @deploy-management/web list)",
+      "Bash(pnpm --filter @deploy-management/web add @xyflow/react)",
+      "Bash(pnpm --filter @deploy-management/web add -D vitest)",
+      "Bash(pnpm --filter @deploy-management/web test)",
+      "Bash(grep -n \"^//go:build\\\\|^// +build\" services/tekton-bridge/internal/backend/tekton.go)",
+      "Bash(pnpm --filter @deploy-management/api test)"
     ]
   }
 }

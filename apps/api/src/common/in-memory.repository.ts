@@ -131,6 +131,7 @@ export const DEPLOYMENT_STORAGE_COLLECTIONS: readonly DeploymentStorageCollectio
   { collection: "release-executions", tableName: "dm_release_executions", description: "上线执行、步骤和回滚锚点" },
   { collection: "release-events", tableName: "dm_release_events", description: "灰度推进、暂停、恢复、全量、回滚事件流" },
   { collection: "approvals", tableName: "dm_approvals", description: "审批请求与决策" },
+  { collection: "webhook-deliveries", tableName: "dm_webhook_deliveries", description: "Webhook delivery 签名校验、去重和触发结果" },
   { collection: "audit-events", tableName: "dm_audit_events", description: "控制面审计事件" },
   { collection: "environments", tableName: "dm_environments", description: "部署环境状态、当前版本和活跃锁" },
   { collection: "runner-pools", tableName: "dm_runner_pools", description: "执行池容量与队列状态" },

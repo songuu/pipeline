@@ -16,6 +16,7 @@ exports.SnapshotController = void 0;
 const common_1 = require("@nestjs/common");
 const shared_1 = require("@deploy-management/shared");
 const api_response_1 = require("../common/api-response");
+const roles_decorator_1 = require("../security/roles.decorator");
 const snapshot_service_1 = require("./snapshot.service");
 let SnapshotController = class SnapshotController {
     snapshot;
@@ -61,6 +62,7 @@ __decorate([
     __metadata("design:returntype", Object)
 ], SnapshotController.prototype, "lifecycle", null);
 exports.SnapshotController = SnapshotController = __decorate([
+    (0, roles_decorator_1.RequireRoles)("viewer"),
     (0, common_1.Controller)(),
     __param(0, (0, common_1.Inject)(snapshot_service_1.SnapshotService)),
     __metadata("design:paramtypes", [snapshot_service_1.SnapshotService])

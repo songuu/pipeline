@@ -410,15 +410,36 @@ function paramAppliesToStage(param: GlobalParam, stage: LifecycleStageKey): bool
   return stageKeys.includes(param.key);
 }
 
-function buildTaskGraph(
+export const DEFAULT_STAGE_DAG: Record<LifecycleStageKey, LifecycleStageKey[]> = {
+  source: [],
+  test: ["source"],
+  build: ["source"],
+  env: ["test", "build"],
+  package: ["env"],
+  upload: ["package"],
+  deploy: ["upload"],
+  canary: ["deploy"],
+  approval: ["canary"],
+  promote: ["approval"],
+};
+
+export function resolveStageRunAfter(
+  stage: LifecycleStageKey,
+  enabledStages: ReadonlySet<LifecycleStageKey>,
+): LifecycleStageKey[] {
+  return (DEFAULT_STAGE_DAG[stage] ?? []).filter((dep) => enabledStages.has(dep));
+}
+
+export function buildTaskGraph(
   pipeline: PipelineDefinition,
   params: GlobalParam[],
   workspaces: TektonWorkspaceBinding[],
 ): TektonTaskGraphNode[] {
-  return pipeline.stages.map((stage, index) => ({
+  const stageSet = new Set(pipeline.stages);
+  return pipeline.stages.map((stage) => ({
     name: stage,
     taskRef: `${stage}-task`,
-    runAfter: index === 0 ? [] : [pipeline.stages[index - 1]],
+    runAfter: resolveStageRunAfter(stage, stageSet),
     workspaces: (stageWorkspaces[stage] ?? ["source-ws"]).filter((name) => workspaces.some((workspace) => workspace.name === name)),
     params: params.filter((param) => paramAppliesToStage(param, stage)),
     retries: stage === "upload" || stage === "deploy" ? 1 : 0,

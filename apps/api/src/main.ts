@@ -34,7 +34,7 @@ async function bootstrap() {
     ? { origin: allowed, credentials: true }
     : false;
 
-  const app = await NestFactory.create(AppModule, { cors: corsOptions });
+  const app = await NestFactory.create(AppModule, { cors: corsOptions, rawBody: true });
   app.setGlobalPrefix("");
   await app.listen(process.env.PORT ? Number(process.env.PORT) : 4000, "0.0.0.0");
 }

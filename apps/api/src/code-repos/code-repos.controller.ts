@@ -2,6 +2,7 @@ import { Body, Controller, Get, Inject, Param, Post } from "@nestjs/common";
 import type { ApiResponse, RemoteRepositoryRefs, ResolvedRemoteRepository, SourceRepository } from "@deploy-management/shared";
 import { ok } from "../common/api-response";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
+import { RequireRoles } from "../security/roles.decorator";
 import { CodeReposService } from "./code-repos.service";
 import {
   remoteRepositoryRefsSchema,
@@ -10,6 +11,7 @@ import {
   type ResolveRepositoryDto,
 } from "./dto/remote-repository.dto";
 
+@RequireRoles("viewer")
 @Controller()
 export class CodeReposController {
   constructor(@Inject(CodeReposService) private readonly service: CodeReposService) {}
@@ -20,6 +22,7 @@ export class CodeReposController {
   }
 
   @Post("api/repositories/resolve")
+  @RequireRoles("member")
   resolve(
     @Body(new ZodValidationPipe(resolveRepositorySchema)) body: ResolveRepositoryDto,
   ): Promise<ResolvedRemoteRepository> {
@@ -27,6 +30,7 @@ export class CodeReposController {
   }
 
   @Post("api/repositories/refs")
+  @RequireRoles("member")
   refs(
     @Body(new ZodValidationPipe(remoteRepositoryRefsSchema)) body: RemoteRepositoryRefsDto,
   ): Promise<RemoteRepositoryRefs> {

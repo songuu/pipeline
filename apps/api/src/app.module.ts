@@ -12,6 +12,7 @@ import { PipelinesModule } from "./pipelines/pipelines.module";
 import { ReleasesModule } from "./releases/releases.module";
 import { RunnersModule } from "./runners/runners.module";
 import { RunsModule } from "./runs/runs.module";
+import { SecurityModule } from "./security/security.module";
 import { SnapshotModule } from "./snapshot/snapshot.module";
 import { StorageModule } from "./storage/storage.module";
 
@@ -30,6 +31,7 @@ import { StorageModule } from "./storage/storage.module";
     ReleasesModule,
     RunnersModule,
     RunsModule,
+    SecurityModule,
     SnapshotModule,
     StorageModule,
   ],

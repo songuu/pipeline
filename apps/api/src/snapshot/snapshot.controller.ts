@@ -6,8 +6,10 @@ import {
   type PlatformSnapshot,
 } from "@deploy-management/shared";
 import { ok } from "../common/api-response";
+import { RequireRoles } from "../security/roles.decorator";
 import { SnapshotService } from "./snapshot.service";
 
+@RequireRoles("viewer")
 @Controller()
 export class SnapshotController {
   constructor(@Inject(SnapshotService) private readonly snapshot: SnapshotService) {}

@@ -1,8 +1,10 @@
 import { Body, Controller, Get, Inject, Param, Post } from "@nestjs/common";
 import type { ApiResponse, DeploymentEnvironment, DeploymentTarget, EnvironmentLock } from "@deploy-management/shared";
 import { ok } from "../common/api-response";
+import { RequireRoles } from "../security/roles.decorator";
 import { EnvironmentsService, type CreateDeploymentTargetInput, type DeploymentTargetPreflightResult } from "./environments.service";
 
+@RequireRoles("viewer")
 @Controller()
 export class EnvironmentsController {
   constructor(@Inject(EnvironmentsService) private readonly service: EnvironmentsService) {}
@@ -24,6 +26,7 @@ export class EnvironmentsController {
   }
 
   @Post("api/deployment-targets")
+  @RequireRoles("member")
   legacyCreateTarget(@Body() body: CreateDeploymentTargetInput): Promise<DeploymentTarget> {
     return this.service.createDeploymentTarget(body);
   }
@@ -34,6 +37,7 @@ export class EnvironmentsController {
   }
 
   @Post("api/deployment-targets/:targetId/preflight")
+  @RequireRoles("member")
   legacyPreflightTarget(@Param("targetId") targetId: string): DeploymentTargetPreflightResult {
     return this.service.preflightDeploymentTarget(this.service.getDeploymentTarget(targetId));
   }
@@ -45,6 +49,7 @@ export class EnvironmentsController {
   }
 
   @Post("oapi/v1/flow/deployment-targets")
+  @RequireRoles("member")
   async createTarget(@Body() body: CreateDeploymentTargetInput): Promise<ApiResponse<DeploymentTarget>> {
     return ok(await this.service.createDeploymentTarget(body));
   }
@@ -56,6 +61,7 @@ export class EnvironmentsController {
   }
 
   @Post("oapi/v1/flow/deployment-targets/:targetId/preflight")
+  @RequireRoles("member")
   preflightTarget(@Param("targetId") targetId: string): ApiResponse<DeploymentTargetPreflightResult> {
     return ok(this.service.preflightDeploymentTarget(this.service.getDeploymentTarget(targetId)));
   }

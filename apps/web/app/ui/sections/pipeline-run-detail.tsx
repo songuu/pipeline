@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Check, Code2, Copy, MoreHorizontal, PackageCheck, Terminal, X } from "lucide-react";
 import {
   DEFAULT_PIPELINE_BUILD_CONFIG,
@@ -18,6 +18,8 @@ import { env } from "../../lib/env";
 import { JobCard } from "../components/job-card";
 import { StatusBadge, Summary } from "../components/primitives";
 import { ReleaseEventMiniTimeline, ReleaseEventTimeline, sortReleaseEvents } from "../components/release-event-timeline";
+import { PipelineFlowCanvas } from "../graph/pipeline-flow-canvas";
+import { pipelineRunToGraph } from "../graph/pipeline-graph-adapter";
 
 interface PipelineRunDetailProps {
   snapshot: PlatformSnapshot;
@@ -62,6 +64,7 @@ export function PipelineRunDetail({
   const [taskRunLogs, setTaskRunLogs] = useState<TektonTaskRunLogs | null>(null);
   const [taskRunError, setTaskRunError] = useState("");
   const [taskRunLoading, setTaskRunLoading] = useState(false);
+  const [pipelineViewMode, setPipelineViewMode] = useState<"canvas" | "board">("canvas");
   const repository = snapshot.repositories.find((item) => item.id === run.repositoryId);
   const tektonRun = snapshot.tekton.runRecords.find((item) => item.runId === run.id);
   const tektonBinding = snapshot.tekton.bindings.find((item) => item.pipelineId === run.pipelineId);
@@ -85,7 +88,38 @@ export function PipelineRunDetail({
   const activeStepName = selectedStepName || taskRunSteps[0]?.name || "";
   const selectedTaskRunResults = Object.entries(taskRunDetail?.results ?? selectedTaskRun?.results ?? {});
   const taskRunLogLines = taskRunLogs?.lines ?? selectedStage?.logs ?? ["暂无日志"];
-  const commandCountsByStage = countCommandEventsByStage(liveRunEvents);
+  const commandCountsByStage = useMemo(
+    () => countCommandEventsByStage(liveRunEvents),
+    [liveRunEvents],
+  );
+  const artifactCountsByStageMap = useMemo(
+    () => artifactCountsByStage(runArtifacts, run),
+    [runArtifacts, run.definitionSnapshot.stages],
+  );
+  const errorSummariesMap = useMemo(
+    () => errorSummariesByStage(run.stages),
+    [run.stages],
+  );
+  const taskRunNameMap = useMemo<Partial<Record<LifecycleStageKey, string>>>(
+    () =>
+      Object.fromEntries(
+        (tektonRun?.taskRuns ?? []).map((tr) => [
+          tr.pipelineTaskName as LifecycleStageKey,
+          tr.taskRunName,
+        ]),
+      ),
+    [tektonRun?.taskRuns],
+  );
+  const pipelineFlowGraph = useMemo(
+    () =>
+      pipelineRunToGraph(run, {
+        commandCounts: commandCountsByStage as Partial<Record<LifecycleStageKey, number>>,
+        artifactCounts: artifactCountsByStageMap,
+        errorSummaries: errorSummariesMap,
+        taskRunNames: taskRunNameMap,
+      }),
+    [run, commandCountsByStage, artifactCountsByStageMap, errorSummariesMap, taskRunNameMap],
+  );
   const executionModelForStage = (stage: PipelineRun["stages"][number] | undefined) => {
     if (!stage) {
       return { commands: [] as StageExecutionCommand[], sourceLabel: "等待执行器", recorded: false };
@@ -349,36 +383,71 @@ export function PipelineRunDetail({
                 展开流水线源
               </button>
             )}
-            <div className="pipeline-board">
-              {groups.map((group, index) => (
-                <div className="stage-column" key={group.title}>
-                  <h2>{group.title}</h2>
-                  <div className="job-stack">
-                    {group.stages.map((stage) => {
-                      const stageExecutionModel = executionModelForStage(stage);
-                      return (
-                        <JobCard
-                          key={stage.id}
-                          stage={stage}
-                          selected={stage.key === selectedStage?.key}
-                          executionCount={stageExecutionModel.commands.length || commandCountsByStage[stage.key] || 0}
-                          executionSourceLabel={stageExecutionModel.sourceLabel}
-                          executionCommands={stageExecutionModel.commands}
-                          executionExpanded={expandedExecutionStageKey === stage.key}
-                          onSelect={() => setSelectedStageKey(stage.key)}
-                          onToggleExecution={() => {
-                            setSelectedStageKey(stage.key);
-                            setExpandedExecutionStageKey((current) => (current === stage.key ? "" : stage.key));
-                          }}
-                          onRetry={onRun}
-                          runStatus={run.status}
-                        />
-                      );
-                    })}
-                  </div>
-                  {index < groups.length - 1 && <div className="stage-divider" />}
+            <div className="pipeline-view">
+              <div className="pipeline-view-toolbar">
+                <div className="pipeline-view-toggle" role="group" aria-label="流水线视图切换">
+                  <button
+                    type="button"
+                    className={pipelineViewMode === "canvas" ? "active" : ""}
+                    onClick={() => setPipelineViewMode("canvas")}
+                  >
+                    DAG 视图
+                  </button>
+                  <button
+                    type="button"
+                    className={pipelineViewMode === "board" ? "active" : ""}
+                    onClick={() => setPipelineViewMode("board")}
+                  >
+                    列布局（旧）
+                  </button>
                 </div>
-              ))}
+              </div>
+              {pipelineViewMode === "canvas" ? (
+                <div className="pipeline-flow-shell">
+                  <PipelineFlowCanvas
+                    graph={pipelineFlowGraph}
+                    mode="readonly"
+                    selectedStageKey={selectedStageKey}
+                    onSelectStage={(stage) => {
+                      setSelectedStageKey(stage);
+                      setExpandedExecutionStageKey(stage);
+                    }}
+                    minHeight={520}
+                  />
+                </div>
+              ) : (
+                <div className="pipeline-board">
+                  {groups.map((group, index) => (
+                    <div className="stage-column" key={group.title}>
+                      <h2>{group.title}</h2>
+                      <div className="job-stack">
+                        {group.stages.map((stage) => {
+                          const stageExecutionModel = executionModelForStage(stage);
+                          return (
+                            <JobCard
+                              key={stage.id}
+                              stage={stage}
+                              selected={stage.key === selectedStage?.key}
+                              executionCount={stageExecutionModel.commands.length || commandCountsByStage[stage.key] || 0}
+                              executionSourceLabel={stageExecutionModel.sourceLabel}
+                              executionCommands={stageExecutionModel.commands}
+                              executionExpanded={expandedExecutionStageKey === stage.key}
+                              onSelect={() => setSelectedStageKey(stage.key)}
+                              onToggleExecution={() => {
+                                setSelectedStageKey(stage.key);
+                                setExpandedExecutionStageKey((current) => (current === stage.key ? "" : stage.key));
+                              }}
+                              onRetry={onRun}
+                              runStatus={run.status}
+                            />
+                          );
+                        })}
+                      </div>
+                      {index < groups.length - 1 && <div className="stage-divider" />}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
             <aside className="tekton-run-panel">
               <div className="tekton-run-head">
@@ -810,6 +879,43 @@ function commandEventDetails(
   }
   if (details.length > 0) return details;
   return previousDetails;
+}
+
+function artifactCountsByStage(
+  artifacts: ReadonlyArray<{ type: string }>,
+  run: PipelineRun,
+): Partial<Record<LifecycleStageKey, number>> {
+  const enabledStages = new Set(run.definitionSnapshot.stages);
+  const counts: Partial<Record<LifecycleStageKey, number>> = {};
+  const bumpByType = (type: string) => {
+    if (type === "image") {
+      const target: LifecycleStageKey = enabledStages.has("upload") ? "upload" : "build";
+      counts[target] = (counts[target] ?? 0) + 1;
+    } else if (type === "package") {
+      const target: LifecycleStageKey = enabledStages.has("package") ? "package" : "build";
+      counts[target] = (counts[target] ?? 0) + 1;
+    } else if (type === "sbom" || type === "provenance") {
+      const target: LifecycleStageKey = enabledStages.has("package") ? "package" : "upload";
+      if (enabledStages.has(target)) counts[target] = (counts[target] ?? 0) + 1;
+    }
+  };
+  for (const artifact of artifacts) bumpByType(artifact.type);
+  return counts;
+}
+
+function errorSummariesByStage(
+  stages: ReadonlyArray<PipelineRun["stages"][number]>,
+): Partial<Record<LifecycleStageKey, string>> {
+  const summaries: Partial<Record<LifecycleStageKey, string>> = {};
+  for (const stage of stages) {
+    if (stage.status !== "failed") continue;
+    const candidates = [...stage.logs]
+      .reverse()
+      .find((line) => /error|fail|exception|×|✗|错误|失败|异常|未通过|超时/i.test(line));
+    const summary = (candidates ?? stage.logs[stage.logs.length - 1] ?? "执行失败").trim();
+    summaries[stage.key] = summary.length > 80 ? `${summary.slice(0, 77)}…` : summary;
+  }
+  return summaries;
 }
 
 function countCommandEventsByStage(events: StoredRunEvent[]): Partial<Record<LifecycleStageKey, number>> {

@@ -21,6 +21,7 @@ const pipelines_module_1 = require("./pipelines/pipelines.module");
 const releases_module_1 = require("./releases/releases.module");
 const runners_module_1 = require("./runners/runners.module");
 const runs_module_1 = require("./runs/runs.module");
+const security_module_1 = require("./security/security.module");
 const snapshot_module_1 = require("./snapshot/snapshot.module");
 const storage_module_1 = require("./storage/storage.module");
 let AppModule = class AppModule {
@@ -42,6 +43,7 @@ exports.AppModule = AppModule = __decorate([
             releases_module_1.ReleasesModule,
             runners_module_1.RunnersModule,
             runs_module_1.RunsModule,
+            security_module_1.SecurityModule,
             snapshot_module_1.SnapshotModule,
             storage_module_1.StorageModule,
         ],

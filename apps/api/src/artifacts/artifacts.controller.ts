@@ -1,8 +1,10 @@
 import { Controller, Get, Inject } from "@nestjs/common";
 import type { ApiResponse, Artifact } from "@deploy-management/shared";
 import { ok } from "../common/api-response";
+import { RequireRoles } from "../security/roles.decorator";
 import { ArtifactsService } from "./artifacts.service";
 
+@RequireRoles("viewer")
 @Controller()
 export class ArtifactsController {
   constructor(@Inject(ArtifactsService) private readonly service: ArtifactsService) {}

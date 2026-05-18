@@ -15,6 +15,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.ApplicationsController = void 0;
 const common_1 = require("@nestjs/common");
 const api_response_1 = require("../common/api-response");
+const roles_decorator_1 = require("../security/roles.decorator");
 const applications_service_1 = require("./applications.service");
 let ApplicationsController = class ApplicationsController {
     service;
@@ -53,6 +54,7 @@ __decorate([
     __metadata("design:returntype", Object)
 ], ApplicationsController.prototype, "get", null);
 exports.ApplicationsController = ApplicationsController = __decorate([
+    (0, roles_decorator_1.RequireRoles)("viewer"),
     (0, common_1.Controller)(),
     __param(0, (0, common_1.Inject)(applications_service_1.ApplicationsService)),
     __metadata("design:paramtypes", [applications_service_1.ApplicationsService])

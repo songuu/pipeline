@@ -9,7 +9,8 @@
     "dev:web": "pnpm --filter @deploy-management/web dev",
     "build": "pnpm -r build",
     "check": "pnpm -r check",
-    "test": "pnpm -r --if-present test"
+    "test": "pnpm -r --if-present test",
+    "migrate:storage:supabase": "node scripts/migrate-json-to-supabase.mjs"
   },
   "devDependencies": {
     "typescript": "^5.9.0"

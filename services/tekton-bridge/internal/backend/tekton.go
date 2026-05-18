@@ -826,12 +826,51 @@ func (t *TektonBackend) paramSpecs(input domain.StartRunInput) []interface{} {
 	return specs
 }
 
+// defaultStageDAG mirrors apps/api buildTaskGraph DEFAULT_STAGE_DAG so that
+// inline PipelineRun task graphs express true parallel/fan-in semantics
+// (e.g. test and build both depend on source, env fans in from test+build).
+var defaultStageDAG = map[string][]string{
+	"source":   nil,
+	"test":     {"source"},
+	"build":    {"source"},
+	"env":      {"test", "build"},
+	"package":  {"env"},
+	"upload":   {"package"},
+	"deploy":   {"upload"},
+	"canary":   {"deploy"},
+	"approval": {"canary"},
+	"promote":  {"approval"},
+}
+
+func resolveStageRunAfter(stage string, enabled map[string]bool) []string {
+	deps, ok := defaultStageDAG[stage]
+	if !ok || len(deps) == 0 {
+		return nil
+	}
+	filtered := make([]string, 0, len(deps))
+	for _, dep := range deps {
+		if enabled[dep] {
+			filtered = append(filtered, dep)
+		}
+	}
+	return filtered
+}
+
 func (t *TektonBackend) inlineTasks(input domain.StartRunInput) []interface{} {
 	tasks := make([]interface{}, 0, len(input.Stages))
-	for index, stage := range input.Stages {
+	enabled := make(map[string]bool, len(input.Stages))
+	for _, stage := range input.Stages {
+		enabled[stage] = true
+	}
+	for _, stage := range input.Stages {
 		task := t.inlineTask(stage, input)
-		if index > 0 {
-			task["runAfter"] = []interface{}{input.Stages[index-1]}
+		deps := resolveStageRunAfter(stage, enabled)
+		if len(deps) > 0 {
+			runAfter := make([]interface{}, 0, len(deps))
+			for _, dep := range deps {
+				runAfter = append(runAfter, dep)
+			}
+			task["runAfter"] = runAfter
 		}
 		tasks = append(tasks, task)
 	}

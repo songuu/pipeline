@@ -63,6 +63,13 @@ pnpm dev:api:local-docker
 | `SUPABASE_URL` | (空) | `DEPLOYMENT_STORAGE=supabase` 时必填；当前项目地址为 `https://br-ideal-fawn-814db5fc.supabase.aidap-global.cn-beijing.volces.com:443` |
 | `SUPABASE_SERVICE_ROLE_KEY` | (空) | `DEPLOYMENT_STORAGE=supabase` 时必填，只能放 API 服务端环境变量，不能暴露给 Web |
 | `SUPABASE_SCHEMA` | `public` | Supabase PostgREST schema |
+| `CONTROL_PLANE_AUTH_REQUIRED` | `false` | 设为 `true` 后写操作和受保护读操作必须携带控制面令牌；生产环境即使未设置也会按启用处理 |
+| `CONTROL_PLANE_API_TOKEN` | (空) | 控制面 Bearer token / `x-control-plane-token`，只放 API 服务端和可信调用方 |
+| `CONTROL_PLANE_JWT_SECRET` | (空) | 可选 HS256 JWT secret；Bearer JWT 校验通过后从 `role` / `app_metadata.role` / `user_metadata.role` 提取角色 |
+| `CONTROL_PLANE_DEFAULT_ROLE` | `admin` | 令牌通过后的默认角色：`admin` / `member` / `viewer`；请求头 `x-devops-role` 只能降级不能提权 |
+| `WEBHOOK_SECRET` | (空) | 通用 webhook secret；GitHub/GitLab/GitCode 专用 secret 或 pipeline 专用 secret 优先 |
+| `GITHUB_WEBHOOK_SECRET` / `GITLAB_WEBHOOK_SECRET` / `GITCODE_WEBHOOK_SECRET` | (空) | Provider 级 webhook secret；分别校验 GitHub HMAC、GitLab token、GitCode/Gitee token 或 HMAC |
+| `PIPELINE_WEBHOOK_SECRET_<PIPELINE_ID>` | (空) | Pipeline 级 secret；`pipelineId` 转大写并把非字母数字替换为 `_` |
 | `WEB_ORIGIN` | (空) | Nest CORS allowlist (逗号分隔)；空则关闭 CORS |
 | `GITHUB_TOKEN` | (空) | 可选，私有 GitHub 仓库拉取分支 / Tag / Commit 时使用 |
 | `GITLAB_TOKEN` | (空) | 可选，私有 GitLab 或自建 GitLab 仓库拉取分支 / Tag / Commit 时使用 |
@@ -98,6 +105,7 @@ pnpm dev:api:local-docker
 - `GET /api/storage/health` — 检查当前控制面存储后端，本地 JSON 或 Supabase 迁移/连接状态
 - `POST /api/repositories/resolve` — 根据 GitHub/GitLab/GitCode 仓库地址解析 provider、默认分支、分支和 Tag
 - `POST /api/repositories/refs` — 根据仓库地址与 `refType=branch|tag` 拉取远程 refs，支持 `page` / `perPage` / `search`
+- `POST /api/webhooks/:provider/pipelines/:pipelineId` — 接收 GitHub / GitLab / GitCode / generic webhook，校验签名或 token、delivery 去重后触发流水线
 - `GET/POST /api/pipelines` — 流水线 CRUD
 - `POST /api/pipelines/:id/trigger` — 触发运行
 - `GET /api/runs[/:id[/logs]]` — 运行查询
@@ -120,6 +128,7 @@ pnpm dev:api:local-docker
 - `GET /oapi/v1/flow/pipelineRuns[/:id]`
 - `POST /oapi/v1/flow/pipelineRuns/:id/{cancel,promote}`
 - `POST /oapi/v1/flow/approvals/:id/:decision`
+- `POST /oapi/v1/flow/webhooks/:provider/pipelines/:pipelineId`
 
 ## Tekton bridge
 
@@ -130,8 +139,9 @@ pnpm dev:api:local-docker
 - 如果本机 Kubernetes 不可用，可以使用 `EXECUTOR=local-docker`：API 进程会在本机直接执行 `git clone`、`pnpm/npm/yarn run <packageBuildScript>`、`docker build`、`docker login`、`docker push`，不需要 Kubernetes namespace / PVC / Secret，但需要本机 Docker daemon 可用，并通过 `ACR_PASSWORD` 等环境变量提供 registry 密码。
 - 触发包含 `build` / `upload` 的真实流水线时会先做前置校验：缺少 `EXECUTOR=tekton`、`TEKTON_SOURCE_PVC`、package.json 打包脚本、真实产物目录、镜像 registry/namespace/name/tag、Dockerfile/context、或 docker-registry Secret 时，API 会直接返回缺失项，不再进入假成功流程。
 - 控制面会把 pipeline、run、artifact、release、approval、audit 等状态落盘到 `DEPLOYMENT_DATA_DIR`，并使用稳定随机 ID，避免 API 重启后复用 `run-1` / `artifact-1` 这类旧编号。
-- 如果要接入 Supabase，先在 Supabase SQL Editor 执行 `supabase/migrations/20260518_domain_storage_tables.sql`，再设置 `DEPLOYMENT_STORAGE=supabase`、`SUPABASE_URL`、`SUPABASE_SERVICE_ROLE_KEY`。service role key 只给 Nest API 使用，不进入 Next.js 前端。旧的 `20260514_deployment_records.sql` / `20260518_release_records_indexes.sql` 只保留给已经试运行过的通用 JSONB 单表迁移做兼容参考。
-- Supabase 模式会按业务域写入不同表：`dm_applications`、`dm_source_repositories`、`dm_pipelines`、`dm_pipeline_runs`、`dm_run_events`、`dm_artifacts`、`dm_releases`、`dm_deployment_targets`、`dm_environment_locks`、`dm_release_plans`、`dm_release_executions`、`dm_release_events`、`dm_approvals`、`dm_audit_events`、`dm_environments`、`dm_runner_pools`。灰度推进、暂停、恢复、全量、回滚、失败都会生成独立 release event。
+- 如果要接入 Supabase，先在 Supabase SQL Editor 执行 `supabase/migrations/20260518_domain_storage_tables.sql`，再设置 `DEPLOYMENT_STORAGE=supabase`、`SUPABASE_URL`、`SUPABASE_SERVICE_ROLE_KEY`。已有 `.deploy-data/*.json` 时先用 PowerShell 执行 `$env:DRY_RUN="true"; pnpm migrate:storage:supabase` 检查记录数量，再清掉 `DRY_RUN` 并执行 `pnpm migrate:storage:supabase` 一次性迁移。service role key 只给 Nest API 使用，不进入 Next.js 前端。旧的 `20260514_deployment_records.sql` / `20260518_release_records_indexes.sql` 只保留给已经试运行过的通用 JSONB 单表迁移做兼容参考。
+- Supabase 模式会按业务域写入不同表：`dm_applications`、`dm_source_repositories`、`dm_pipelines`、`dm_pipeline_runs`、`dm_run_events`、`dm_artifacts`、`dm_releases`、`dm_deployment_targets`、`dm_environment_locks`、`dm_release_plans`、`dm_release_executions`、`dm_release_events`、`dm_approvals`、`dm_webhook_deliveries`、`dm_audit_events`、`dm_environments`、`dm_runner_pools`。Webhook 去重、灰度推进、暂停、恢复、全量、回滚、失败都会生成独立业务记录。
+- 控制面 RBAC 是最小角色模型：`viewer` 可读，`member` 可触发运行、审批、上线、预检和修改配置，`admin` 额外允许删除流水线。默认本地开发不强制 token；生产或 `CONTROL_PLANE_AUTH_REQUIRED=true` 必须携带 `Authorization: Bearer <CONTROL_PLANE_API_TOKEN>`、`x-control-plane-token`，或由 `CONTROL_PLANE_JWT_SECRET` 校验通过的 HS256 JWT。
 - API 启动时会向上查找并加载 `.env`；已有 shell 环境变量优先级更高，不会被 `.env` 覆盖。`.env` 已在 `.gitignore` 中，适合放本机 service role key。
 - 真实打包/上传会在创建 run 前解析分支或 Tag 对应的真实 commit；如果 provider 暂不支持或 GitCode 缺少令牌，会直接报错要求补充 commit/token，不再用随机 commit 生成镜像 Tag。
 - inline 正式流程按顺序执行：`git clone/checkout` → `pnpm/npm/yarn run <packageBuildScript>` → `docker build` → `docker push`，并把 registry 返回的 digest 回写为真实镜像产物。

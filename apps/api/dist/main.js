@@ -33,7 +33,7 @@ async function bootstrap() {
     const corsOptions = allowed.length > 0
         ? { origin: allowed, credentials: true }
         : false;
-    const app = await core_1.NestFactory.create(app_module_1.AppModule, { cors: corsOptions });
+    const app = await core_1.NestFactory.create(app_module_1.AppModule, { cors: corsOptions, rawBody: true });
     app.setGlobalPrefix("");
     await app.listen(process.env.PORT ? Number(process.env.PORT) : 4000, "0.0.0.0");
 }
