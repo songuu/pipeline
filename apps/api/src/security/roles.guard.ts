@@ -1,5 +1,5 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
-import { CanActivate, ExecutionContext, ForbiddenException, Injectable, UnauthorizedException } from "@nestjs/common";
+import { CanActivate, ExecutionContext, ForbiddenException, Inject, Injectable, UnauthorizedException } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import { SecretResolverService } from "./secret-resolver.service";
 import { REQUIRED_ROLES_KEY } from "./roles.decorator";
@@ -13,10 +13,18 @@ const ROLE_RANK: Record<ControlPlaneRole, number> = {
 
 @Injectable()
 export class RolesGuard implements CanActivate {
+  private readonly reflector: Reflector;
+  private readonly secrets: SecretResolverService;
+
   constructor(
-    private readonly reflector: Reflector,
-    private readonly secrets: SecretResolverService,
-  ) {}
+    @Inject(Reflector) reflector?: Reflector,
+    @Inject(SecretResolverService) secrets?: SecretResolverService,
+  ) {
+    // tsx/esbuild dev restarts can lose Nest constructor metadata in stale
+    // processes; keep the guard usable so auth does not crash the control plane.
+    this.reflector = reflector ?? new Reflector();
+    this.secrets = secrets ?? new SecretResolverService();
+  }
 
   canActivate(context: ExecutionContext): boolean {
     const requiredRoles = this.reflector.getAllAndOverride<ControlPlaneRole[]>(REQUIRED_ROLES_KEY, [

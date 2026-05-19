@@ -5724,8 +5724,7 @@ button.flow-workspace-card:hover,
 }
 
 .codeup-shell .codeup-topbar,
-.codeup-shell .cloud-full-main,
-.codeup-shell .modal-backdrop {
+.codeup-shell .cloud-full-main {
   position: relative;
   z-index: 1;
 }
@@ -6083,6 +6082,12 @@ button.flow-workspace-card:hover,
 }
 
 .codeup-shell .modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: grid;
+  place-items: center;
+  overflow: auto;
   background: rgba(1, 8, 18, 0.72);
 }
 
@@ -6254,8 +6259,17 @@ button.flow-workspace-card:hover,
 }
 
 .tekton-object-list {
-  max-height: 42vh;
+  max-height: none;
+  overflow: visible;
+}
+
+.tekton-object-stack {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  max-height: 320px;
   overflow: auto;
+  padding-right: 2px;
 }
 
 .tekton-condition,
@@ -6330,6 +6344,72 @@ button.flow-workspace-card:hover,
 .codeup-shell .job-card p,
 .codeup-shell .tekton-object-row small {
   color: #9db2ce;
+}
+
+.codeup-shell .tekton-object-list {
+  display: grid;
+  gap: 10px;
+  max-height: none;
+  overflow: visible;
+  padding: 12px;
+}
+
+.codeup-shell .tekton-object-list h3 {
+  min-width: 0;
+  line-height: 1.35;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.codeup-shell .tekton-object-stack {
+  max-height: 280px;
+}
+
+.codeup-shell .tekton-object-row {
+  min-width: 0;
+  border: 1px solid rgba(125, 197, 255, 0.18);
+  border-radius: 8px;
+  background: rgba(6, 16, 32, 0.54);
+  padding: 9px 10px;
+}
+
+.codeup-shell .tekton-object-row.active {
+  border-color: rgba(66, 215, 255, 0.62);
+  background:
+    linear-gradient(90deg, rgba(66, 215, 255, 0.14), rgba(18, 255, 210, 0.06)),
+    rgba(6, 16, 32, 0.72);
+}
+
+.codeup-shell .tekton-object-row strong,
+.codeup-shell .tekton-object-row small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.tekton-object-empty {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  gap: 5px;
+  border: 1px dashed rgba(125, 197, 255, 0.26);
+  border-radius: 8px;
+  background: rgba(6, 16, 32, 0.46);
+  color: #dbeafe;
+  padding: 10px 11px;
+  text-align: left;
+}
+
+.tekton-object-empty strong {
+  color: #e8f6ff;
+  font-size: 12px;
+}
+
+.tekton-object-empty span {
+  color: #9db2ce;
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .codeup-shell .tekton-workspace-list em,
@@ -6695,7 +6775,7 @@ button.flow-workspace-card:hover,
 .codeup-shell .run-canvas {
   height: calc(100vh - 214px);
   min-height: 570px;
-  grid-template-columns: 250px minmax(0, 1fr) 360px;
+  grid-template-columns: 250px minmax(0, 1fr) minmax(392px, 420px);
   overflow: hidden;
   border-color: rgba(66, 215, 255, 0.3);
   border-radius: 14px;
@@ -6705,7 +6785,7 @@ button.flow-workspace-card:hover,
 }
 
 .codeup-shell .run-canvas.source-collapsed {
-  grid-template-columns: 54px minmax(0, 1fr) 360px;
+  grid-template-columns: 54px minmax(0, 1fr) minmax(392px, 420px);
 }
 
 .codeup-shell .source-panel,
@@ -6793,7 +6873,17 @@ button.flow-workspace-card:hover,
     linear-gradient(180deg, rgba(66, 215, 255, 0.065), transparent 34%),
     linear-gradient(310deg, rgba(251, 191, 36, 0.035), transparent 52%),
     rgba(9, 21, 38, 0.92);
-  padding: 18px 18px 24px;
+  min-width: 0;
+  overflow-x: hidden;
+  padding: 18px 20px 24px;
+}
+
+.codeup-shell .tekton-run-panel > * {
+  min-width: 0;
+}
+
+.codeup-shell .tekton-run-head {
+  padding-right: 8px;
 }
 
 .codeup-shell .primary-artifact-card,
@@ -7336,11 +7426,11 @@ button.flow-workspace-card:hover,
   }
 
   .run-canvas {
-    grid-template-columns: 232px minmax(0, 1fr) 300px;
+    grid-template-columns: 232px minmax(0, 1fr) 360px;
   }
 
   .run-canvas.source-collapsed {
-    grid-template-columns: 54px minmax(0, 1fr) 300px;
+    grid-template-columns: 54px minmax(0, 1fr) 360px;
   }
 
   .pipeline-board {
@@ -7350,7 +7440,7 @@ button.flow-workspace-card:hover,
   }
 
   .tekton-run-panel {
-    padding-inline: 14px;
+    padding-inline: 16px;
   }
 
   .pipeline-config-topbar h1 {
@@ -7689,6 +7779,192 @@ button.flow-workspace-card:hover,
   .codeup-shell .flow-table {
     max-width: 100%;
   }
+}
+
+.inspectable-card {
+  cursor: pointer;
+  outline: none;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    background 160ms ease,
+    transform 160ms ease;
+}
+
+.inspectable-card:hover {
+  border-color: rgba(34, 211, 238, 0.72) !important;
+  box-shadow:
+    inset 0 0 0 1px rgba(34, 211, 238, 0.1),
+    0 0 22px rgba(34, 211, 238, 0.14);
+}
+
+.inspectable-card:focus-visible {
+  outline: 2px solid rgba(34, 211, 238, 0.78);
+  outline-offset: 2px;
+}
+
+.inspectable-card:active {
+  transform: translateY(1px);
+}
+
+.run-inspector-panel {
+  position: relative;
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  overflow: visible;
+  border: 1px solid rgba(34, 211, 238, 0.38);
+  border-radius: 10px;
+  background:
+    radial-gradient(circle at top left, rgba(34, 211, 238, 0.18), transparent 34%),
+    linear-gradient(145deg, rgba(13, 31, 62, 0.96), rgba(4, 12, 28, 0.98));
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.04),
+    0 0 32px rgba(34, 211, 238, 0.14);
+  padding: 13px;
+}
+
+.run-inspector-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, rgba(34, 211, 238, 0.12), transparent 35%),
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.04) 0 1px, transparent 1px 18px);
+  opacity: 0.28;
+}
+
+.run-inspector-panel > * {
+  position: relative;
+  z-index: 1;
+}
+
+.run-inspector-panel header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  gap: 8px;
+}
+
+.run-inspector-panel header > div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.run-inspector-panel header span {
+  color: #67e8f9;
+  font-size: 11px;
+}
+
+.run-inspector-panel h3 {
+  margin: 0;
+  color: #f8fbff;
+  font-size: 14px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.run-inspector-panel header em,
+.run-inspector-panel p {
+  margin: 0;
+  color: #9db7d7;
+  font-style: normal;
+  font-size: 11px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.run-inspector-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+}
+
+.run-inspector-actions .artifact-copy-button {
+  min-width: 0;
+  max-width: calc(100% - 38px);
+}
+
+.run-inspector-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+
+.run-inspector-fields span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 7px;
+  background: rgba(2, 6, 23, 0.48);
+  padding: 7px 8px;
+}
+
+.run-inspector-fields strong {
+  color: #8fb6d8;
+  font-size: 10.5px;
+}
+
+.run-inspector-fields em {
+  color: #e0f2fe;
+  font-style: normal;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.run-inspector-code,
+.run-inspector-lines {
+  margin: 0;
+  max-height: 210px;
+  overflow: auto;
+  border: 1px solid rgba(34, 211, 238, 0.16);
+  border-radius: 8px;
+  background: rgba(2, 6, 23, 0.72);
+  padding: 9px;
+}
+
+.run-inspector-code code,
+.run-inspector-lines code {
+  display: block;
+  color: #c4f1ff;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.run-inspector-lines {
+  display: grid;
+  gap: 5px;
+}
+
+.codeup-shell .run-inspector-panel {
+  border-radius: 12px;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.04),
+    0 0 28px rgba(34, 211, 238, 0.16);
+}
+
+.codeup-shell .run-inspector-panel h3,
+.codeup-shell .run-inspector-panel p,
+.codeup-shell .run-inspector-panel code,
+.codeup-shell .tekton-run-summary strong,
+.codeup-shell .tekton-chip-grid strong,
+.codeup-shell .tekton-param-strip em,
+.codeup-shell .tekton-workspace-list em,
+.codeup-shell .tekton-metadata-grid strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .execution-process-panel {
@@ -8235,9 +8511,21 @@ button.flow-workspace-card:hover,
   min-width: 0;
 }
 
+.codeup-shell .primary-artifact-card {
+  gap: 12px;
+  padding: 14px;
+}
+
+.codeup-shell .primary-artifact-card > div {
+  min-width: 0;
+}
+
 .codeup-shell .primary-artifact-card em,
 .codeup-shell .artifact-output-card em {
+  display: block;
+  max-width: 100%;
   line-height: 1.5;
+  white-space: normal;
 }
 
 .codeup-shell .artifact-output-card > div {
@@ -8249,6 +8537,21 @@ button.flow-workspace-card:hover,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.codeup-shell .tekton-runtime-section,
+.codeup-shell .tekton-run-summary,
+.codeup-shell .tekton-chip-grid,
+.codeup-shell .tekton-metadata-grid {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.codeup-shell .tekton-param-strip span,
+.codeup-shell .tekton-workspace-list span,
+.codeup-shell .tekton-record-list span,
+.codeup-shell .tekton-event-list span {
+  min-width: 0;
 }
 
 .codeup-shell .artifact-copy-button {

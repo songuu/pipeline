@@ -27,6 +27,10 @@ export interface TektonTaskRunPanelProps {
   taskRunError: string;
   selectedTaskRunResults: Array<[string, string]>;
   events: TaskRunEventLike[];
+  onInspectStep?: (step: StepInstance) => void;
+  onInspectResult?: (key: string, value: string) => void;
+  onInspectEvent?: (event: TaskRunEventLike) => void;
+  onInspectTaskMeta?: () => void;
 }
 
 export function TektonTaskRunPanel({
@@ -42,6 +46,10 @@ export function TektonTaskRunPanel({
   taskRunError,
   selectedTaskRunResults,
   events,
+  onInspectStep,
+  onInspectResult,
+  onInspectEvent,
+  onInspectTaskMeta,
 }: TektonTaskRunPanelProps) {
   const taskRunName = taskRunDetail?.taskRunName ?? selectedTaskRun?.taskRunName ?? "TaskRun pending";
   const status = taskRunDetail?.status ?? selectedTaskRun?.status ?? "QUEUED";
@@ -86,7 +94,10 @@ export function TektonTaskRunPanel({
             <button
               key={step.id}
               className={`step-line ${step.name === activeStepName ? "active" : ""}`}
-              onClick={() => onSelectStep(step.name)}
+              onClick={() => {
+                onSelectStep(step.name);
+                onInspectStep?.(step);
+              }}
               type="button"
             >
               <strong>{step.name}</strong>
@@ -104,7 +115,18 @@ export function TektonTaskRunPanel({
       {selectedTaskRunResults.length > 0 && (
         <div className="task-result-lines">
           {selectedTaskRunResults.map(([key, value]) => (
-            <span key={key}>
+            <span
+              key={key}
+              className="inspectable-card"
+              onClick={() => onInspectResult?.(key, value)}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter" && event.key !== " ") return;
+                event.preventDefault();
+                onInspectResult?.(key, value);
+              }}
+              role="button"
+              tabIndex={0}
+            >
               <strong>{key}</strong>
               <em>{value}</em>
             </span>
@@ -114,7 +136,18 @@ export function TektonTaskRunPanel({
       {(events.length > 0) && (
         <div className="task-result-lines">
           {events.map((event) => (
-            <span key={`${event.timestamp}-${event.reason}`}>
+            <span
+              key={`${event.timestamp}-${event.reason}`}
+              className="inspectable-card"
+              onClick={() => onInspectEvent?.(event)}
+              onKeyDown={(keyboardEvent) => {
+                if (keyboardEvent.key !== "Enter" && keyboardEvent.key !== " ") return;
+                keyboardEvent.preventDefault();
+                onInspectEvent?.(event);
+              }}
+              role="button"
+              tabIndex={0}
+            >
               <strong>{event.reason}</strong>
               <em>{event.message}</em>
             </span>
@@ -122,7 +155,17 @@ export function TektonTaskRunPanel({
         </div>
       )}
       {selectedTaskGraph && (
-        <div className="tekton-task-meta">
+        <div
+          className="tekton-task-meta inspectable-card"
+          onClick={() => onInspectTaskMeta?.()}
+          onKeyDown={(event) => {
+            if (event.key !== "Enter" && event.key !== " ") return;
+            event.preventDefault();
+            onInspectTaskMeta?.();
+          }}
+          role="button"
+          tabIndex={0}
+        >
           <h4>任务定义</h4>
           <div className="tekton-task-meta-grid">
             <div>

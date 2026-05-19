@@ -4,6 +4,7 @@ import { ForbiddenException } from "@nestjs/common";
 import { describe, expect, afterEach, it } from "vitest";
 import type { Reflector } from "@nestjs/core";
 import { RolesGuard } from "./roles.guard";
+import { REQUIRED_ROLES_KEY } from "./roles.decorator";
 import type { SecretResolverService } from "./secret-resolver.service";
 import type { ControlPlaneRole, HeaderBag, ControlPlanePrincipal } from "./security.types";
 
@@ -26,6 +27,23 @@ describe("RolesGuard", () => {
     expect(request.principal).toMatchObject({
       actor: "alice",
       role: "member",
+      authenticated: false,
+      source: "dev",
+    });
+  });
+
+  it("does not crash when dev runtime misses constructor injection metadata", () => {
+    process.env.NODE_ENV = "development";
+    process.env.CONTROL_PLANE_AUTH_REQUIRED = "false";
+    const request = requestFor({ "x-devops-actor": "hot-reload" });
+    const guard = new RolesGuard();
+    class GuardedController {}
+    Reflect.defineMetadata(REQUIRED_ROLES_KEY, ["member"], GuardedController);
+
+    expect(guard.canActivate(contextFor(request, noopHandler, GuardedController))).toBe(true);
+    expect(request.principal).toMatchObject({
+      actor: "hot-reload",
+      role: "admin",
       authenticated: false,
       source: "dev",
     });
@@ -87,14 +105,22 @@ function requestFor(headers: HeaderBag): { headers: HeaderBag; principal?: Contr
   return { headers };
 }
 
-function contextFor(request: { headers: HeaderBag; principal?: ControlPlanePrincipal }): ExecutionContext {
+function contextFor(
+  request: { headers: HeaderBag; principal?: ControlPlanePrincipal },
+  handler: () => unknown = noopHandler,
+  controller: Function = RolesGuard,
+): ExecutionContext {
   return {
-    getHandler: () => contextFor,
-    getClass: () => RolesGuard,
+    getHandler: () => handler,
+    getClass: () => controller,
     switchToHttp: () => ({
       getRequest: () => request,
     }),
   } as unknown as ExecutionContext;
+}
+
+function noopHandler(): undefined {
+  return undefined;
 }
 
 function jwtFor(payload: Record<string, unknown>, secret: string): string {
