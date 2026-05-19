@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Archive, CheckCircle2, Copy, GitBranch, Plus, Rocket, XCircle } from "lucide-react";
 import {
   DEFAULT_PIPELINE_BUILD_CONFIG,
@@ -25,12 +25,16 @@ import {
   type SourceRepositoryProvider,
   type UpdatePipelineRequest,
   type VariableInjectionTiming,
+  resolveStageRunAfter,
+  validatePipelineGraph,
+  type DagViolation,
 } from "@deploy-management/shared";
 import { fetchRepositoryRefs, resolveRepository } from "../../lib/actions";
 import { Field, Switch, VariableTable, WebhookField } from "../components/primitives";
 import type { PipelineConfigTab } from "../data/templates";
 import { environmentOptions } from "../data/templates";
 import { BasicPanel } from "./basic-panel";
+import { PipelineConfigFlowCanvas } from "./pipeline-config-flow-canvas";
 import {
   STAGE_LABELS,
   TASK_DEFINITIONS,
@@ -106,6 +110,8 @@ export function PipelineConfigEditor({
   const [timerEnabled, setTimerEnabled] = useState(false);
   const [concurrencyEnabled, setConcurrencyEnabled] = useState(false);
   const [selectedTask, setSelectedTask] = useState("JavaScript 代码扫描");
+  const [flowViewMode, setFlowViewMode] = useState<"canvas" | "board">("canvas");
+  const [customEdges, setCustomEdges] = useState<Array<{ from: LifecycleStageKey; to: LifecycleStageKey }>>([]);
   const [savedAt, setSavedAt] = useState("");
   const [enabledStages, setEnabledStages] = useState<LifecycleStageKey[]>(pipeline.stages);
   const [triggers, setTriggers] = useState(pipeline.triggers.join("\n"));
@@ -639,6 +645,90 @@ export function PipelineConfigEditor({
     onNotify(`${taskName} 已选中`);
   };
 
+  const selectStageNode = (stage: LifecycleStageKey) => {
+    const stageTasks = TASK_DEFINITIONS.filter((task) => task.stage === stage);
+    const currentSelectedTask = TASK_DEFINITIONS.find((task) => task.name === selectedTask);
+    if (currentSelectedTask?.stage === stage) return;
+    const target = stageTasks[0];
+    if (!target) return;
+    selectTask(target.name, target.stage);
+  };
+
+  const buildPipelineGraphSnapshot = () => {
+    const stageSet = new Set(enabledStages);
+    const defaultEdges = enabledStages.flatMap((stage) =>
+      resolveStageRunAfter(stage, stageSet).map((from) => ({ from, to: stage })),
+    );
+    const customDedupe = customEdges.filter(
+      (custom) =>
+        stageSet.has(custom.from) &&
+        stageSet.has(custom.to) &&
+        !defaultEdges.some((edge) => edge.from === custom.from && edge.to === custom.to),
+    );
+    return { stages: enabledStages, edges: [...defaultEdges, ...customDedupe] };
+  };
+
+  const reportViolations = (violations: DagViolation[]): boolean => {
+    if (violations.length === 0) return true;
+    const messages = violations.slice(0, 3).map((v) => v.message);
+    const suffix = violations.length > 3 ? ` 等 ${violations.length} 项` : "";
+    onNotify(`DAG 校验未通过: ${messages.join(" / ")}${suffix}`);
+    return false;
+  };
+
+  const handleConnectStages = (payload: { source: LifecycleStageKey; target: LifecycleStageKey }) => {
+    if (payload.source === payload.target) {
+      onNotify("不能连接到自身");
+      return;
+    }
+    const stageSet = new Set(enabledStages);
+    if (!stageSet.has(payload.source) || !stageSet.has(payload.target)) {
+      onNotify("请先启用对应阶段再建立依赖");
+      return;
+    }
+    const probe = {
+      stages: enabledStages,
+      edges: [
+        ...enabledStages.flatMap((stage) =>
+          resolveStageRunAfter(stage, stageSet).map((from) => ({ from, to: stage })),
+        ),
+        ...customEdges,
+        { from: payload.source, to: payload.target },
+      ],
+    };
+    const result = validatePipelineGraph(probe);
+    if (!result.valid) {
+      reportViolations(result.violations);
+      return;
+    }
+    if (customEdges.some((e) => e.from === payload.source && e.to === payload.target)) {
+      onNotify("该依赖已存在");
+      return;
+    }
+    setCustomEdges([...customEdges, { from: payload.source, to: payload.target }]);
+    onNotify(
+      `已建立依赖 (预览): ${payload.source} → ${payload.target} · 注意: 当前版本自定义依赖不会随保存持久化`,
+    );
+  };
+
+  const PRESET_STAGES: Array<{ stage: LifecycleStageKey; label: string }> = [
+    { stage: "approval", label: "+ 审批" },
+    { stage: "canary", label: "+ 灰度" },
+    { stage: "deploy", label: "+ 部署" },
+    { stage: "upload", label: "+ 上传" },
+  ];
+
+  const addPresetStage = (stage: LifecycleStageKey) => {
+    if (enabledStages.includes(stage)) {
+      onNotify(`${stage} 阶段已启用`);
+      selectStageNode(stage);
+      return;
+    }
+    activateStage(stage);
+    selectStageNode(stage);
+    onNotify(`已新增 ${stage} 阶段`);
+  };
+
   const removeSelectedTask = () => {
     const stage = taskStageMap[selectedTask] ?? selectedTaskDefinition.stage;
     if (!stage || stage === "source") {
@@ -668,6 +758,22 @@ export function PipelineConfigEditor({
   };
 
   const saveDraft = async () => {
+    const graphResult = validatePipelineGraph(buildPipelineGraphSnapshot());
+    if (!graphResult.valid) {
+      reportViolations(graphResult.violations);
+      throw new Error("pipeline DAG 校验未通过");
+    }
+    if (customEdges.length > 0) {
+      const proceed = window.confirm(
+        `检测到 ${customEdges.length} 条自定义依赖。当前版本仅支持 stage 启停的持久化，` +
+          `自定义连线不会保存。继续保存 (将丢失自定义连线) ?`,
+      );
+      if (!proceed) {
+        onNotify("已取消保存");
+        throw new Error("user canceled save due to customEdges loss");
+      }
+      onNotify(`保存将丢失 ${customEdges.length} 条自定义连线 (设计中, Sprint C 持久化)`);
+    }
     const updated = await onSavePipeline(buildPipelinePatch());
     setSavedAt(new Date().toLocaleTimeString("zh-CN", { hour12: false }));
     return updated;
@@ -694,6 +800,22 @@ export function PipelineConfigEditor({
     ((stage === "upload" || stage === "deploy" || stage === "canary" || stage === "promote") && !serviceConnection) ||
     (stage === "upload" && (!registryUrl.trim() || !registryNamespace.trim() || !imageName.trim() || (privateRegistry && !dockerConfigSecret.trim()))) ||
     (stage === "env" && stringVariables.length === 0);
+  const invalidStagesSet = useMemo(
+    () => new Set<LifecycleStageKey>(enabledStages.filter((stage) => taskMissingConfig(stage))),
+    [
+      enabledStages,
+      buildCluster,
+      packageBuildScript,
+      packageOutputPaths,
+      serviceConnection,
+      registryUrl,
+      registryNamespace,
+      imageName,
+      privateRegistry,
+      dockerConfigSecret,
+      stringVariables.length,
+    ],
+  );
   const taskClass = (stage: LifecycleStageKey, taskName: string, invalid = false) =>
     [
       "flow-task-pill",
@@ -978,7 +1100,66 @@ export function PipelineConfigEditor({
                 <strong>{tektonBinding?.workspaces.join(" / ") ?? "source-ws / cache-ws"}</strong>
               </div>
             </div>
-            <div className="flow-config-board">
+            <div className="flow-config-viewport">
+              <div className="flow-config-toolbar">
+                {flowViewMode === "canvas" && (
+                  <div className="node-palette" role="group" aria-label="新增预设阶段">
+                    {PRESET_STAGES.map((preset) => (
+                      <button
+                        key={preset.stage}
+                        type="button"
+                        className="node-palette-button"
+                        onClick={() => addPresetStage(preset.stage)}
+                        disabled={enabledStages.includes(preset.stage)}
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div className="pipeline-view-toggle" role="group" aria-label="流水线视图切换">
+                  <button
+                    type="button"
+                    className={flowViewMode === "canvas" ? "active" : ""}
+                    onClick={() => setFlowViewMode("canvas")}
+                  >
+                    DAG 视图
+                  </button>
+                  <button
+                    type="button"
+                    className={flowViewMode === "board" ? "active" : ""}
+                    onClick={() => setFlowViewMode("board")}
+                  >
+                    阶段栏（旧）
+                  </button>
+                </div>
+              </div>
+              {flowViewMode === "canvas" && customEdges.length > 0 && (
+                <div className="custom-edges-preview-banner" role="alert">
+                  <span>预览功能</span>
+                  <em>
+                    已建立 {customEdges.length} 条自定义依赖。当前版本仅持久化 stage 启停，
+                    自定义连线不会随保存写入后端 (Sprint C 议题)。
+                  </em>
+                  <button type="button" onClick={() => setCustomEdges([])}>
+                    清空
+                  </button>
+                </div>
+              )}
+              {flowViewMode === "canvas" ? (
+                <div className="flow-config-canvas-shell">
+                  <PipelineConfigFlowCanvas
+                    pipeline={{ ...pipeline, stages: enabledStages }}
+                    selectedStage={selectedTaskDefinition.stage}
+                    invalidStages={invalidStagesSet}
+                    customEdges={customEdges}
+                    onSelectStage={selectStageNode}
+                    onConnectStages={handleConnectStages}
+                    minHeight={480}
+                  />
+                </div>
+              ) : (
+                <div className="flow-config-board">
               <section className="flow-stage-lane source">
                 <h2>流水线源</h2>
                 <div className="source-config-card">
@@ -1079,6 +1260,8 @@ export function PipelineConfigEditor({
                   新的任务
                 </button>
               </section>
+                </div>
+              )}
             </div>
           </div>
           <aside className={`task-config-panel task-panel-${selectedTaskDefinition.kind}`}>

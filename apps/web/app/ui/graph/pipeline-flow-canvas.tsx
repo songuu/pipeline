@@ -8,8 +8,10 @@ import {
   ReactFlow,
   ReactFlowProvider,
   useReactFlow,
+  type Connection,
   type NodeMouseHandler,
   type NodeTypes,
+  type OnConnect,
 } from "@xyflow/react";
 import type { LifecycleStageKey } from "@deploy-management/shared";
 import { PipelineFlowNode } from "./pipeline-flow-node";
@@ -17,11 +19,17 @@ import type { PipelineFlowCanvasProps, PipelineGraphNode } from "./pipeline-grap
 
 const NODE_TYPES: NodeTypes = { pipelineStage: PipelineFlowNode };
 
+function stageFromNodeId(id: string): LifecycleStageKey | null {
+  if (!id.startsWith("stage:")) return null;
+  return id.slice("stage:".length) as LifecycleStageKey;
+}
+
 function PipelineFlowCanvasInner({
   graph,
   mode = "readonly",
   selectedStageKey,
   onSelectStage,
+  onConnectStages,
   className,
   minHeight = 480,
 }: PipelineFlowCanvasProps) {
@@ -48,6 +56,17 @@ function PipelineFlowCanvasInner({
       onSelectStage(node.data.stage as LifecycleStageKey);
     },
     [onSelectStage],
+  );
+
+  const handleConnect = useCallback<OnConnect>(
+    (connection: Connection) => {
+      if (!onConnectStages || !connection.source || !connection.target) return;
+      const source = stageFromNodeId(connection.source);
+      const target = stageFromNodeId(connection.target);
+      if (!source || !target) return;
+      onConnectStages({ source, target });
+    },
+    [onConnectStages],
   );
 
   useEffect(() => {
@@ -79,6 +98,7 @@ function PipelineFlowCanvasInner({
         edges={edges}
         nodeTypes={NODE_TYPES}
         onNodeClick={handleNodeClick}
+        onConnect={handleConnect}
         nodesDraggable={!isReadonly}
         nodesConnectable={!isReadonly}
         elementsSelectable={true}

@@ -20,6 +20,7 @@ import { StatusBadge, Summary } from "../components/primitives";
 import { ReleaseEventMiniTimeline, ReleaseEventTimeline, sortReleaseEvents } from "../components/release-event-timeline";
 import { PipelineFlowCanvas } from "../graph/pipeline-flow-canvas";
 import { pipelineRunToGraph } from "../graph/pipeline-graph-adapter";
+import { TektonTaskRunPanel } from "./tekton-task-run-panel";
 
 interface PipelineRunDetailProps {
   snapshot: PlatformSnapshot;
@@ -84,6 +85,7 @@ export function PipelineRunDetail({
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   const selectedStage = run.stages.find((stage) => stage.key === selectedStageKey) ?? run.stages[0];
   const selectedTaskRun = tektonRun?.taskRuns.find((taskRun) => taskRun.pipelineTaskName === selectedStage?.key);
+  const selectedTaskGraph = tektonBinding?.taskGraph.find((task) => task.name === selectedStage?.key);
   const taskRunSteps = taskRunDetail?.steps ?? selectedTaskRun?.steps ?? [];
   const activeStepName = selectedStepName || taskRunSteps[0]?.name || "";
   const selectedTaskRunResults = Object.entries(taskRunDetail?.results ?? selectedTaskRun?.results ?? {});
@@ -685,66 +687,20 @@ export function PipelineRunDetail({
                   </button>
                 ))}
               </div>
-              <div className="run-log-panel">
-                <h3>{selectedStage?.title ?? "运行日志"}</h3>
-                <span>
-                  {taskRunDetail?.taskRunName ?? selectedTaskRun?.taskRunName ?? "TaskRun pending"}
-                  {taskRunLoading ? " · loading" : ""}
-                </span>
-                {taskRunError && (
-                  <div className="taskrun-error">
-                    <strong>真实详情暂不可用</strong>
-                    <em>{taskRunError}</em>
-                  </div>
-                )}
-                <div className="step-lines">
-                  {taskRunSteps.length === 0 ? (
-                    <span>
-                      <strong>等待 step</strong>
-                      <em>{selectedTaskRun?.podName ?? taskRunDetail?.podName ?? "pod pending"}</em>
-                      <small>{selectedTaskRun?.status ?? taskRunDetail?.status ?? "QUEUED"}</small>
-                    </span>
-                  ) : (
-                    taskRunSteps.map((step) => (
-                      <button
-                        key={step.id}
-                        className={`step-line ${step.name === activeStepName ? "active" : ""}`}
-                        onClick={() => setSelectedStepName(step.name)}
-                        type="button"
-                      >
-                        <strong>{step.name}</strong>
-                        <em>{step.image ?? "build-steps/alinux3"}</em>
-                        <small>{step.status}</small>
-                      </button>
-                    ))
-                  )}
-                </div>
-                <div className="log-lines">
-                  {taskRunLogLines.map((line, index) => (
-                    <code key={`${line}-${index}`}>{line}</code>
-                  ))}
-                </div>
-                {selectedTaskRunResults.length > 0 && (
-                  <div className="task-result-lines">
-                    {selectedTaskRunResults.map(([key, value]) => (
-                      <span key={key}>
-                        <strong>{key}</strong>
-                        <em>{value}</em>
-                      </span>
-                    ))}
-                  </div>
-                )}
-                {(taskRunDetail?.events ?? []).length > 0 && (
-                  <div className="task-result-lines">
-                    {taskRunDetail?.events.map((event) => (
-                      <span key={`${event.timestamp}-${event.reason}`}>
-                        <strong>{event.reason}</strong>
-                        <em>{event.message}</em>
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
+              <TektonTaskRunPanel
+                selectedStage={selectedStage}
+                selectedTaskRun={selectedTaskRun}
+                selectedTaskGraph={selectedTaskGraph}
+                taskRunDetail={taskRunDetail}
+                taskRunSteps={taskRunSteps}
+                activeStepName={activeStepName}
+                onSelectStep={setSelectedStepName}
+                taskRunLogLines={taskRunLogLines}
+                taskRunLoading={taskRunLoading}
+                taskRunError={taskRunError}
+                selectedTaskRunResults={selectedTaskRunResults}
+                events={taskRunDetail?.events ?? []}
+              />
               <div className="tekton-runtime-section">
                 <h3>Results Records</h3>
                 <div className="tekton-record-list">

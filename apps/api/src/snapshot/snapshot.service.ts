@@ -1,8 +1,10 @@
 import { Inject, Injectable } from "@nestjs/common";
 import {
   DEFAULT_PIPELINE_BUILD_CONFIG,
+  DEFAULT_STAGE_DAG as SHARED_DEFAULT_STAGE_DAG,
   LIFECYCLE_STAGES,
   resolveImageArtifact,
+  resolveStageRunAfter as sharedResolveStageRunAfter,
   toYunxiaoJobStatus,
   toYunxiaoRunStatus,
   type GlobalParam,
@@ -410,25 +412,8 @@ function paramAppliesToStage(param: GlobalParam, stage: LifecycleStageKey): bool
   return stageKeys.includes(param.key);
 }
 
-export const DEFAULT_STAGE_DAG: Record<LifecycleStageKey, LifecycleStageKey[]> = {
-  source: [],
-  test: ["source"],
-  build: ["source"],
-  env: ["test", "build"],
-  package: ["env"],
-  upload: ["package"],
-  deploy: ["upload"],
-  canary: ["deploy"],
-  approval: ["canary"],
-  promote: ["approval"],
-};
-
-export function resolveStageRunAfter(
-  stage: LifecycleStageKey,
-  enabledStages: ReadonlySet<LifecycleStageKey>,
-): LifecycleStageKey[] {
-  return (DEFAULT_STAGE_DAG[stage] ?? []).filter((dep) => enabledStages.has(dep));
-}
+export const DEFAULT_STAGE_DAG = SHARED_DEFAULT_STAGE_DAG;
+export const resolveStageRunAfter = sharedResolveStageRunAfter;
 
 export function buildTaskGraph(
   pipeline: PipelineDefinition,

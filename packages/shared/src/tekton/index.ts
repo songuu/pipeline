@@ -244,3 +244,5 @@ export interface PipelineSpec {
 }
 
 export * from "./runtime";
+export * from "./default-stage-dag";
+export * from "./dag-validation";

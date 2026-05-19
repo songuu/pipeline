@@ -8,6 +8,7 @@ import { EnvironmentsModule } from "./environments/environments.module";
 import { ExecutorsModule } from "./executors/executors.module";
 import { KubernetesModule } from "./kubernetes/kubernetes.module";
 import { LifecycleModule } from "./lifecycle/lifecycle.module";
+import { PipelineLayoutsModule } from "./pipeline-layouts/pipeline-layouts.module";
 import { PipelinesModule } from "./pipelines/pipelines.module";
 import { ReleasesModule } from "./releases/releases.module";
 import { RunnersModule } from "./runners/runners.module";
@@ -28,6 +29,7 @@ import { StorageModule } from "./storage/storage.module";
     CodeReposModule,
     EnvironmentsModule,
     PipelinesModule,
+    PipelineLayoutsModule,
     ReleasesModule,
     RunnersModule,
     RunsModule,

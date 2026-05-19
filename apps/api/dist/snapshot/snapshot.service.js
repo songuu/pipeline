@@ -12,8 +12,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.DEFAULT_STAGE_DAG = exports.SnapshotService = void 0;
-exports.resolveStageRunAfter = resolveStageRunAfter;
+exports.resolveStageRunAfter = exports.DEFAULT_STAGE_DAG = exports.SnapshotService = void 0;
 exports.buildTaskGraph = buildTaskGraph;
 const common_1 = require("@nestjs/common");
 const shared_1 = require("@deploy-management/shared");
@@ -400,27 +399,14 @@ function paramAppliesToStage(param, stage) {
     const stageKeys = stageParamKeys[stage] ?? ["git-url", "revision", "target-env"];
     return stageKeys.includes(param.key);
 }
-exports.DEFAULT_STAGE_DAG = {
-    source: [],
-    test: ["source"],
-    build: ["source"],
-    env: ["test", "build"],
-    package: ["env"],
-    upload: ["package"],
-    deploy: ["upload"],
-    canary: ["deploy"],
-    approval: ["canary"],
-    promote: ["approval"],
-};
-function resolveStageRunAfter(stage, enabledStages) {
-    return (exports.DEFAULT_STAGE_DAG[stage] ?? []).filter((dep) => enabledStages.has(dep));
-}
+exports.DEFAULT_STAGE_DAG = shared_1.DEFAULT_STAGE_DAG;
+exports.resolveStageRunAfter = shared_1.resolveStageRunAfter;
 function buildTaskGraph(pipeline, params, workspaces) {
     const stageSet = new Set(pipeline.stages);
     return pipeline.stages.map((stage) => ({
         name: stage,
         taskRef: `${stage}-task`,
-        runAfter: resolveStageRunAfter(stage, stageSet),
+        runAfter: (0, exports.resolveStageRunAfter)(stage, stageSet),
         workspaces: (stageWorkspaces[stage] ?? ["source-ws"]).filter((name) => workspaces.some((workspace) => workspace.name === name)),
         params: params.filter((param) => paramAppliesToStage(param, stage)),
         retries: stage === "upload" || stage === "deploy" ? 1 : 0,

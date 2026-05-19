@@ -107,6 +107,7 @@ exports.DEPLOYMENT_STORAGE_COLLECTIONS = [
     { collection: "audit-events", tableName: "dm_audit_events", description: "控制面审计事件" },
     { collection: "environments", tableName: "dm_environments", description: "部署环境状态、当前版本和活跃锁" },
     { collection: "runner-pools", tableName: "dm_runner_pools", description: "执行池容量与队列状态" },
+    { collection: "pipeline-graph-layouts", tableName: "dm_pipeline_graph_layouts", description: "流水线 DAG UI 布局偏好 (节点位置/缩放/视口)，按 pipeline_id + actor 隔离" },
 ];
 function deploymentStorageCollections() {
     return [...exports.DEPLOYMENT_STORAGE_COLLECTIONS];

@@ -2452,6 +2452,248 @@ h2 {
   background: rgba(6, 14, 27, 0.5);
 }
 
+.flow-config-viewport {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+}
+
+.flow-config-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.node-palette {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.node-palette-button {
+  appearance: none;
+  border: 1px dashed var(--strong-line);
+  background: var(--soft);
+  color: var(--text);
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.node-palette-button:hover:not(:disabled) {
+  background: var(--blue-soft);
+  border-color: var(--blue);
+  color: var(--blue-dark);
+}
+
+.node-palette-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.codeup-shell .node-palette-button {
+  background: rgba(3, 9, 20, 0.55);
+  border-color: rgba(66, 215, 255, 0.3);
+  color: rgba(232, 240, 252, 0.85);
+}
+
+.codeup-shell .node-palette-button:hover:not(:disabled) {
+  background: rgba(66, 215, 255, 0.18);
+  color: #e8f7ff;
+}
+
+.custom-edges-preview-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  margin: 0 16px 8px;
+  border-radius: 6px;
+  background: var(--amber-soft);
+  border: 1px solid #f1cf6c;
+  color: #7c5300;
+  font-size: 12px;
+}
+
+.custom-edges-preview-banner span {
+  font-weight: 600;
+  background: #d98900;
+  color: #fff;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.custom-edges-preview-banner em {
+  flex: 1;
+  font-style: normal;
+  line-height: 1.6;
+}
+
+.custom-edges-preview-banner button {
+  appearance: none;
+  border: 1px solid #d98900;
+  background: transparent;
+  color: #7c5300;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.custom-edges-preview-banner button:hover {
+  background: #d98900;
+  color: #fff;
+}
+
+.codeup-shell .custom-edges-preview-banner {
+  background: rgba(217, 137, 0, 0.18);
+  border-color: rgba(217, 137, 0, 0.55);
+  color: #ffd277;
+}
+
+.codeup-shell .custom-edges-preview-banner button {
+  border-color: rgba(255, 210, 119, 0.6);
+  color: #ffd277;
+}
+
+.taskrun-condition {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  margin: 6px 0;
+  border-radius: 6px;
+  background: var(--soft);
+  border: 1px solid var(--line);
+}
+
+.taskrun-condition em {
+  font-style: normal;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.tekton-task-meta {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--soft);
+  border: 1px solid var(--line);
+}
+
+.tekton-task-meta h4 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.tekton-task-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.tekton-task-meta-grid > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.tekton-task-meta-grid > div span {
+  color: var(--muted);
+}
+
+.tekton-task-meta-grid > div strong {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.tekton-task-meta-block {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tekton-task-meta-block > span {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.tekton-task-meta-block ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tekton-task-meta-block li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.tekton-task-meta-block li code {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  background: rgba(15, 23, 42, 0.06);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.tekton-task-meta-block li em {
+  font-style: normal;
+  color: var(--muted);
+}
+
+.tekton-task-meta-block li.muted {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.codeup-shell .tekton-task-meta,
+.codeup-shell .taskrun-condition {
+  background: rgba(6, 14, 27, 0.6);
+  border-color: rgba(66, 215, 255, 0.18);
+}
+
+.codeup-shell .tekton-task-meta-block li code {
+  background: rgba(66, 215, 255, 0.08);
+  color: #e8f7ff;
+}
+
+.flow-config-canvas-shell {
+  flex: 1;
+  min-width: 0;
+  min-height: 480px;
+  padding: 12px 16px 16px;
+  overflow: hidden;
+}
+
+.codeup-shell .flow-config-toolbar {
+  background: rgba(6, 14, 27, 0.72);
+  border-bottom-color: rgba(66, 215, 255, 0.18);
+}
+
+.codeup-shell .flow-config-canvas-shell {
+  background: rgba(6, 14, 27, 0.5);
+}
+
 .stage-column {
   position: relative;
   min-height: 620px;

@@ -92,6 +92,44 @@ export const fetchTektonTaskRunLogs = (
   );
 };
 
+export interface PipelineGraphLayoutPayload {
+  nodes: Array<{ id: string; position: { x: number; y: number }; data?: Record<string, unknown> }>;
+  edges: Array<{ id: string; source: string; target: string }>;
+  viewport?: { x: number; y: number; zoom: number };
+}
+
+export interface PipelineGraphLayoutRecord {
+  id: string;
+  pipeline_id: string;
+  actor: string;
+  payload: PipelineGraphLayoutPayload;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * 不传 actor —— 后端从已认证 principal 取，避免跨用户访问 (Sprint B Phase 4 P1 安全修复)。
+ */
+export const fetchPipelineGraphLayout = (
+  pipelineId: string,
+  options: RequestOptions = {},
+): Promise<PipelineGraphLayoutRecord> =>
+  apiFetch<PipelineGraphLayoutRecord>(
+    `/api/pipelines/${encodeURIComponent(pipelineId)}/graph-layout`,
+    options,
+  );
+
+export const savePipelineGraphLayout = (
+  pipelineId: string,
+  payload: PipelineGraphLayoutPayload,
+  options: RequestOptions = {},
+): Promise<PipelineGraphLayoutRecord> =>
+  apiFetch<PipelineGraphLayoutRecord>(
+    `/api/pipelines/${encodeURIComponent(pipelineId)}/graph-layout`,
+    { ...options, method: "PUT", body: payload },
+  );
+
 async function readApiError(response: Response): Promise<string> {
   const text = await response.text().catch(() => "");
   if (!text) return response.statusText;

@@ -39,11 +39,17 @@ export interface PipelineGraph {
   edges: PipelineGraphEdge[];
 }
 
+export interface PipelineFlowConnectPayload {
+  source: LifecycleStageKey;
+  target: LifecycleStageKey;
+}
+
 export interface PipelineFlowCanvasProps {
   graph: PipelineGraph;
   mode?: PipelineGraphMode;
   selectedStageKey?: LifecycleStageKey;
   onSelectStage?: (stage: LifecycleStageKey) => void;
+  onConnectStages?: (payload: PipelineFlowConnectPayload) => void;
   className?: string;
   minHeight?: number;
 }
