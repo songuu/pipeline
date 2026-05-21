@@ -61,14 +61,21 @@ that existing cluster Pipeline and passes platform params. If it is not set,
 the backend creates a self-contained inline `pipelineSpec` so a cluster with
 Tekton installed can still run a smoke PipelineRun.
 
-Build and image push params come from the Nest pipeline definition, not from a
-hard-coded registry. The API passes `PACKAGE_BUILD_SCRIPT`,
-`PACKAGE_OUTPUT_PATHS`, `REGISTRY_PROVIDER`, `IMAGE_REF`, `IMAGE_REGISTRY`,
-`IMAGE_REPOSITORY`, `DOCKERFILE_PATH`, `BUILD_CONTEXT`, and
+Build, package upload, and image push params come from the Nest pipeline
+definition, not from a hard-coded registry. The API passes `PACKAGE_MODE`,
+`BUILD_CONTEXT`, `PACKAGE_BUILD_COMMAND_MODE`, `PACKAGE_BUILD_SCRIPT`, `PACKAGE_BUILD_COMMAND`,
+`PACKAGE_OUTPUT_PATHS`, `PACKAGE_UPLOAD_PROVIDER`, `PACKAGE_UPLOAD_ENDPOINT`,
+`PACKAGE_UPLOAD_PUBLIC_BASE_URL`, `PACKAGE_UPLOAD_ACCESS_DOMAIN`,
+`PACKAGE_UPLOAD_TARGET_PATH`, `PACKAGE_UPLOAD_COMMAND_MODE`,
+`PACKAGE_UPLOAD_COMMAND`, `REGISTRY_PROVIDER`,
+`IMAGE_REF`, `IMAGE_REGISTRY`, `IMAGE_REPOSITORY`, `DOCKERFILE_PATH`, and
 `REGISTRY_SERVICE_CONNECTION` to the bridge. In inline mode the real flow is:
-`git clone/checkout` -> `pnpm/npm/yarn run <PACKAGE_BUILD_SCRIPT>` ->
-`docker build` -> `docker push`. Set `TEKTON_SOURCE_PVC` for the shared checkout
-workspace. The docker config secret is resolved from run param
+`git clone/checkout` -> command selected by `PACKAGE_BUILD_COMMAND_MODE`
+(`custom` runs `PACKAGE_BUILD_COMMAND`, `script` runs
+`pnpm/npm/yarn run <PACKAGE_BUILD_SCRIPT>`) -> package upload for non-container
+modes, or `docker build` -> `docker push` for `container_image`. Set
+`TEKTON_SOURCE_PVC` for the shared checkout workspace. The docker config secret
+is resolved from run param
 `REGISTRY_DOCKER_SECRET` first, then `TEKTON_DOCKER_SECRET`, and is mounted at
 `/root/.docker` for authenticated registries. The Secret must be a
 docker-registry Secret (`kubernetes.io/dockerconfigjson` or
@@ -79,6 +86,17 @@ command when it is missing. The default ACR target is
 For real runs keep the Nest API on `EXECUTOR=tekton`; simulated fallback must
 stay disabled. The Nest API checks `/healthz` before creating a run and rejects
 the request if the bridge reports `backend=simulated`.
+
+For non-container modes (`static_site`, `server_package`,
+`kubernetes_manifest`, `helm_chart`) the generated upload task requires a build
+stage, mirrors the package to the configured upload path, and emits
+`package-uri`, `package-public-url`, and `package-storage-provider` results.
+`PACKAGE_UPLOAD_COMMAND_MODE=custom` makes `PACKAGE_UPLOAD_COMMAND` call an OSS
+CLI, `rsync`, `scp`, or a private uploader after the mirror copy; `provider`
+keeps the built-in upload path even if a typed command is saved for later. The
+task exports `PACKAGE_ARCHIVE_PATH`,
+`PACKAGE_MIRROR_PATH`, `PACKAGE_DIGEST`, `PACKAGE_URI`, and
+`PACKAGE_PUBLIC_URL` for that command.
 
 Inline Docker builds use a `docker:27-dind` sidecar plus `docker:27-cli` steps.
 The Tekton namespace must allow privileged sidecars; otherwise the Docker build
@@ -105,6 +123,11 @@ task fails loudly instead of producing a fake artifact.
 | `TEKTON_CACHE_PVC` | unset | optional workspace binding for `cache-ws` |
 | `TEKTON_DOCKER_SECRET` | unset | fallback secret workspace for `docker-config`; run param `REGISTRY_DOCKER_SECRET` wins |
 | `TEKTON_KUBECONFIG_SECRET` | unset | optional secret workspace for `kubeconfig` |
+
+Package upload destinations are configured per pipeline through
+`packageUpload`. Local smoke runs can set `PACKAGE_UPLOAD_ROOT` on the Nest API
+process to choose where non-container packages are mirrored before a custom
+upload command runs.
 
 ## Smoke test
 

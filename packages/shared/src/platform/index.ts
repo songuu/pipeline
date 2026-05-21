@@ -24,8 +24,14 @@ export type GitReferenceType = "branch" | "tag";
 export type VariableInjectionTiming = "build" | "runtime" | "deploy";
 export type SourceRepositoryProvider = "codeup" | "github" | "gitlab" | "gitcode" | "gitea";
 export type PipelineBuildRuntime = "node" | "go" | "generic";
+export const PACKAGE_BUILD_COMMAND_MODES = ["script", "custom"] as const;
+export type PackageBuildCommandMode = (typeof PACKAGE_BUILD_COMMAND_MODES)[number];
 export const PACKAGE_MODES = ["container_image", "static_site", "server_package", "kubernetes_manifest", "helm_chart"] as const;
 export type PackageMode = (typeof PACKAGE_MODES)[number];
+export const PACKAGE_UPLOAD_PROVIDERS = ["local-filesystem", "oss", "static-server", "custom"] as const;
+export type PackageUploadProvider = (typeof PACKAGE_UPLOAD_PROVIDERS)[number];
+export const PACKAGE_UPLOAD_COMMAND_MODES = ["provider", "custom"] as const;
+export type PackageUploadCommandMode = (typeof PACKAGE_UPLOAD_COMMAND_MODES)[number];
 export type RolloutCapability = "traffic" | "cdn" | "instance" | "kubernetes" | "helm" | "manual";
 
 export type LifecycleStageSpec = {
@@ -98,6 +104,7 @@ export type PipelineDefinition = {
   serviceConnections?: string[];
   imageArtifact?: ImageArtifactConfig;
   buildConfig?: PipelineBuildConfig;
+  packageUpload?: PackageUploadConfig;
 };
 
 export type PipelineCacheConfig = {
@@ -110,16 +117,57 @@ export type PipelineCacheConfig = {
 export type PipelineBuildConfig = {
   packageMode?: PackageMode;
   runtime?: PipelineBuildRuntime;
+  contextPath?: string;
+  packageBuildCommandMode?: PackageBuildCommandMode;
   packageBuildScript: string;
+  packageBuildCommand?: string;
   packageOutputPaths: string[];
 };
 
 export const DEFAULT_PIPELINE_BUILD_CONFIG: PipelineBuildConfig = {
   packageMode: "container_image",
   runtime: "node",
+  contextPath: ".",
+  packageBuildCommandMode: "script",
   packageBuildScript: "build",
   packageOutputPaths: [".next", "dist", "build", "out", "apps/web/.next", "apps/api/dist", "packages/shared/dist"],
 };
+
+export type PackageUploadConfig = {
+  provider: PackageUploadProvider;
+  customUploadCommandMode?: PackageUploadCommandMode;
+  endpoint: string;
+  publicBaseUrl?: string;
+  accessDomain?: string;
+  targetPathTemplate: string;
+  serviceConnection: string;
+  customUploadCommand?: string;
+};
+
+export const DEFAULT_PACKAGE_UPLOAD_CONFIG: PackageUploadConfig = {
+  provider: "local-filesystem",
+  customUploadCommandMode: "provider",
+  endpoint: ".codex-tmp/package-uploads",
+  targetPathTemplate: "${application.id}/${environment}/${run.id}/${artifact.name}",
+  serviceConnection: "local-package-store",
+};
+
+export function resolvePackageBuildCommandMode(config: Pick<PipelineBuildConfig, "packageBuildCommandMode" | "packageBuildCommand">): PackageBuildCommandMode {
+  return config.packageBuildCommandMode ?? (config.packageBuildCommand?.trim() ? "custom" : "script");
+}
+
+export function shouldRunCustomPackageBuildCommand(config: Pick<PipelineBuildConfig, "packageBuildCommandMode" | "packageBuildCommand">): boolean {
+  return resolvePackageBuildCommandMode(config) === "custom" && Boolean(config.packageBuildCommand?.trim());
+}
+
+export function resolvePackageUploadCommandMode(config: Pick<PackageUploadConfig, "provider" | "customUploadCommandMode" | "customUploadCommand">): PackageUploadCommandMode {
+  if (config.provider === "custom") return "custom";
+  return config.customUploadCommandMode ?? (config.customUploadCommand?.trim() ? "custom" : "provider");
+}
+
+export function shouldRunCustomPackageUploadCommand(config: Pick<PackageUploadConfig, "provider" | "customUploadCommandMode" | "customUploadCommand">): boolean {
+  return resolvePackageUploadCommandMode(config) === "custom" && Boolean(config.customUploadCommand?.trim());
+}
 
 export type PipelineStageRun = {
   id: string;
@@ -193,6 +241,7 @@ export type CreatePipelineRequest = {
   serviceConnections?: string[];
   imageArtifact?: ImageArtifactConfig;
   buildConfig?: PipelineBuildConfig;
+  packageUpload?: PackageUploadConfig;
 };
 
 export type UpdatePipelineRequest = Partial<
@@ -217,6 +266,7 @@ export type UpdatePipelineRequest = Partial<
     | "serviceConnections"
     | "imageArtifact"
     | "buildConfig"
+    | "packageUpload"
   >
 >;
 
@@ -271,6 +321,9 @@ export type Artifact = {
   size: string;
   signed: boolean;
   uploadedAt: string;
+  uri?: string;
+  publicUrl?: string;
+  storageProvider?: PackageUploadProvider | ImageArtifactConfig["registryProvider"];
 };
 
 export type AuditEvent = {

@@ -12,8 +12,10 @@ import {
   type SourceRepository,
   type StartPipelineRunParams,
   type TriggerRunRequest,
-  ensureRegistryUploadStage,
+  ensureArtifactUploadStage,
   resolveImageArtifact,
+  resolvePackageBuildCommandMode,
+  resolvePackageUploadCommandMode,
 } from "@deploy-management/shared";
 import { ApplicationsService } from "../applications/applications.service";
 import { ApprovalsService } from "../approvals/approvals.service";
@@ -97,8 +99,14 @@ export class RunsService {
     }
 
     const requestedStages = request.stages ? this.pipelines.normalizeStages(request.stages) : pipeline.stages;
+    const buildConfig = pipeline.buildConfig ?? DEFAULT_PIPELINE_BUILD_CONFIG;
+    const imageArtifact = buildConfig.packageMode === "container_image" ? resolveImageArtifact(pipeline) : undefined;
     const runtimeStages = this.pipelines.normalizeStages(
-      ensureRegistryUploadStage(requestedStages, resolveImageArtifact(pipeline)),
+      ensureArtifactUploadStage(requestedStages, {
+        packageMode: buildConfig.packageMode,
+        imageArtifact,
+        packageUpload: pipeline.packageUpload,
+      }),
     );
     const runPipeline: PipelineDefinition = {
       ...pipeline,
@@ -265,8 +273,10 @@ export class RunsService {
     const requiresRealBuild = stages.has("build") || stages.has("upload");
     if (!requiresRealBuild) return;
 
-    const image = resolveImageArtifact(pipeline);
     const buildConfig = pipeline.buildConfig ?? DEFAULT_PIPELINE_BUILD_CONFIG;
+    const packageMode = buildConfig.packageMode ?? "container_image";
+    const image = packageMode === "container_image" ? resolveImageArtifact(pipeline) : undefined;
+    const packageUpload = pipeline.packageUpload;
     const missing: string[] = [];
 
     const backend = this.lifecycle.backendTag;
@@ -282,44 +292,69 @@ export class RunsService {
     if ((stages.has("build") || stages.has("upload")) && !stages.has("source") && !process.env.TEKTON_PIPELINE_REF) {
       missing.push("inline Pipeline 的真实打包/上传必须包含 source 阶段，用于正式拉取代码");
     }
-    if (!image.registryUrl.trim()) {
-      missing.push("镜像仓库地址 imageArtifact.registryUrl 不能为空");
-    }
-    if (!image.namespace.trim()) {
-      missing.push("镜像 namespace/project 不能为空");
-    }
-    if (!image.imageName.trim()) {
-      missing.push("镜像仓库名称 imageName 不能为空");
-    }
-    if (!image.tagTemplate.trim()) {
-      missing.push("镜像 Tag 模板 tagTemplate 不能为空");
-    }
     if (stages.has("build") || stages.has("upload")) {
-      if (!buildConfig.packageBuildScript.trim()) {
-        missing.push("package.json 打包脚本不能为空，请配置 buildConfig.packageBuildScript，例如 build 或 build:prod");
+      const buildCommandMode = resolvePackageBuildCommandMode(buildConfig);
+      if (buildCommandMode === "custom" && !buildConfig.packageBuildCommand?.trim()) {
+        missing.push("已选择手输打包命令，但自定义命令为空，请填写 buildConfig.packageBuildCommand 或切回 package.json 脚本");
+      }
+      if (buildCommandMode === "script" && !buildConfig.packageBuildScript.trim()) {
+        missing.push("已选择 package.json 脚本打包，但脚本名为空，请填写 buildConfig.packageBuildScript 或切换到手输命令");
       }
       if (buildConfig.packageOutputPaths.length === 0) {
         missing.push("真实打包需要至少一个产物目录，例如 .next、dist、build 或 out");
       }
-      if (!image.dockerfilePath.trim()) {
-        missing.push("Dockerfile 路径不能为空");
-      }
-      if (!image.contextPath.trim()) {
-        missing.push("构建上下文 contextPath 不能为空");
+      if (!buildConfig.contextPath?.trim()) {
+        missing.push("构建上下文 buildConfig.contextPath 不能为空");
       }
       if (backend === "tekton" && !process.env.TEKTON_PIPELINE_REF && !process.env.TEKTON_SOURCE_PVC) {
         missing.push("缺少 TEKTON_SOURCE_PVC，inline Pipeline 需要 source-ws PVC 承载真实 checkout、package 打包产物和 Docker build 上下文");
       }
     }
     if (stages.has("upload")) {
-      if (!image.serviceConnection.trim()) {
-        missing.push("上传服务连接不能为空");
-      }
-      if (backend === "tekton" && image.privateRegistry && !image.dockerConfigSecret?.trim() && !process.env.TEKTON_DOCKER_SECRET) {
-        missing.push("私有镜像仓库需要 docker-registry Secret：配置 imageArtifact.dockerConfigSecret 或 TEKTON_DOCKER_SECRET");
-      }
-      if (backend === "local-docker" && image.privateRegistry && !hasLocalRegistryPassword()) {
-        missing.push("本机 Docker 推送私有镜像需要设置 ACR_PASSWORD、ALIYUN_ACR_PASSWORD、REGISTRY_PASSWORD 或 DOCKER_PASSWORD");
+      if (packageMode === "container_image") {
+        if (!image?.registryUrl.trim()) {
+          missing.push("镜像仓库地址 imageArtifact.registryUrl 不能为空");
+        }
+        if (!image?.namespace.trim()) {
+          missing.push("镜像 namespace/project 不能为空");
+        }
+        if (!image?.imageName.trim()) {
+          missing.push("镜像仓库名称 imageName 不能为空");
+        }
+        if (!image?.tagTemplate.trim()) {
+          missing.push("镜像 Tag 模板 tagTemplate 不能为空");
+        }
+        if (!image?.dockerfilePath.trim()) {
+          missing.push("Dockerfile 路径不能为空");
+        }
+        if (!image?.contextPath.trim()) {
+          missing.push("Docker build contextPath 不能为空");
+        }
+        if (!image?.serviceConnection.trim()) {
+          missing.push("上传服务连接不能为空");
+        }
+        if (backend === "tekton" && image?.privateRegistry && !image.dockerConfigSecret?.trim() && !process.env.TEKTON_DOCKER_SECRET) {
+          missing.push("私有镜像仓库需要 docker-registry Secret：配置 imageArtifact.dockerConfigSecret 或 TEKTON_DOCKER_SECRET");
+        }
+        if (backend === "local-docker" && image?.privateRegistry && !hasLocalRegistryPassword()) {
+          missing.push("本机 Docker 推送私有镜像需要设置 ACR_PASSWORD、ALIYUN_ACR_PASSWORD、REGISTRY_PASSWORD 或 DOCKER_PASSWORD");
+        }
+      } else {
+        if (!stages.has("build")) {
+          missing.push("非镜像包上传必须包含 build 阶段，upload 需要读取 build 产出的 package artifact");
+        }
+        if (!packageUpload?.endpoint.trim()) {
+          missing.push("非镜像包上传需要配置 packageUpload.endpoint，例如 oss://bucket/path、静态服务器目录或本地发布目录");
+        }
+        if (!packageUpload?.serviceConnection.trim()) {
+          missing.push("非镜像包上传需要配置 packageUpload.serviceConnection");
+        }
+        if (!packageUpload?.targetPathTemplate.trim()) {
+          missing.push("非镜像包上传需要配置 packageUpload.targetPathTemplate");
+        }
+        if (packageUpload && resolvePackageUploadCommandMode(packageUpload) === "custom" && !packageUpload.customUploadCommand?.trim()) {
+          missing.push("已选择自定义上传方式，但上传命令为空，请填写 packageUpload.customUploadCommand 或切回内置上传流程");
+        }
       }
     }
 

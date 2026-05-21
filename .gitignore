@@ -2,8 +2,11 @@
 .agent-runs/
 *.bak.*
 .env
+.env.*
+!.env.example
 .deploy-data/
 node_modules/
 .next/
 dist/
 apps/api/dist
+*.log

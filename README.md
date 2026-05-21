@@ -41,7 +41,10 @@ docs/
 # 1. 安装依赖
 pnpm install
 
-# 2. 三个进程
+# 2. 常规本地联调（同时启动 API + Web）
+pnpm dev                                      # API: http://127.0.0.1:4000, Web: http://127.0.0.1:3000
+
+# 也可以拆成独立终端启动
 pnpm dev:api                                    # http://127.0.0.1:4000
 (cd services/tekton-bridge && go run ./cmd/server)  # http://127.0.0.1:5050
 pnpm dev:web                                    # http://127.0.0.1:3000
@@ -49,6 +52,33 @@ pnpm dev:web                                    # http://127.0.0.1:3000
 # 本机真实构建/推送，不依赖 Kubernetes
 pnpm dev:api:local-docker
 ```
+
+`apps/web/next.config.mjs` 会把 `/api/*` 代理到 `API_PROXY_TARGET`，默认是 `http://127.0.0.1:4000`。如果只启动 `pnpm dev:web` 而没有启动 API，Next 终端会持续打印 `ECONNREFUSED 127.0.0.1:4000`，页面也会停在快照加载失败状态。
+
+## 生产构建与上传
+
+仓库提供一键发布脚本，会在本机完成 shared / Nest API / Next 控制台 / Go Tekton bridge 构建，组合成一个 release 包，通过 `scp` 上传到服务器，并在远端解压到版本目录。
+
+```powershell
+# 生产密钥放在 .env.production；该文件默认被 .gitignore 忽略
+Copy-Item .env.example .env.production
+
+pnpm deploy:prod -- `
+  -SshTarget deploy@deploy.example.com `
+  -RemoteRoot /opt/deploy-management `
+  -EnvFile .env.production `
+  -BridgeTargetOs linux `
+  -BridgeTargetArch amd64 `
+  -RestartPm2
+```
+
+脚本默认行为：
+
+- 本地执行 `pnpm install --frozen-lockfile`、类型检查、三个 Node 包构建、`go build -tags tekton`。
+- 打包 `apps/api/dist`、`apps/web/.next`、`packages/shared/dist`、`services/tekton-bridge/tekton-bridge`。
+- 上传到 `<RemoteRoot>/incoming/<release>.tar.gz`，解压到 `<RemoteRoot>/releases/<release>`，并把 `<RemoteRoot>/current` 切到新版本。
+- 如果提供 `-RestartPm2`，远端执行 `pm2 startOrReload ecosystem.config.cjs --update-env`，同时启动/重载 `dm-api`、`dm-web`、`dm-tekton-bridge` 三个服务。
+- 如果只想构建并上传，不切换版本，追加 `-UploadOnly`。
 
 ## 环境变量
 
@@ -136,17 +166,19 @@ pnpm dev:api:local-docker
 - `TektonBackend` 调用 `tektoncd/pipeline` 创建真实 `PipelineRun` CRD，并从 PipelineRun / TaskRun 状态实时回写运行详情；API 会先检查 bridge `/healthz`，如果返回 `backend=simulated` 会直接拒绝真实打包/上传。
 - 本地默认不假设 Kubernetes 可用：`EXECUTOR=local-docker` 时 `/api/kubernetes/capabilities` 会返回 `kubernetes.local-disabled`，运行详情也不会请求 `127.0.0.1:5050` 的 Tekton bridge。只有 `EXECUTOR=tekton` 或 `KUBERNETES_ENABLED=true` 才会进入 k8s/Tekton 检查。
 - 真实打包必须使用 `EXECUTOR=tekton` 或 `EXECUTOR=local-docker`；默认 `simulated` 只用于流程演示，不再生成可复制的真实镜像产物，避免把模拟结果误当成已经推送到 registry 的镜像。
-- 如果本机 Kubernetes 不可用，可以使用 `EXECUTOR=local-docker`：API 进程会在本机直接执行 `git clone`、`pnpm/npm/yarn run <packageBuildScript>`、`docker build`、`docker login`、`docker push`，不需要 Kubernetes namespace / PVC / Secret，但需要本机 Docker daemon 可用，并通过 `ACR_PASSWORD` 等环境变量提供 registry 密码。
-- 触发包含 `build` / `upload` 的真实流水线时会先做前置校验：缺少 `EXECUTOR=tekton`、`TEKTON_SOURCE_PVC`、package.json 打包脚本、真实产物目录、镜像 registry/namespace/name/tag、Dockerfile/context、或 docker-registry Secret 时，API 会直接返回缺失项，不再进入假成功流程。
+- 如果本机 Kubernetes 不可用，可以使用 `EXECUTOR=local-docker`：API 进程会在本机直接执行 `git clone`、按 `packageBuildCommandMode` 选择的手输打包命令或 `pnpm/npm/yarn run <packageBuildScript>`、包上传、`docker build`、`docker login`、`docker push`，不需要 Kubernetes namespace / PVC / Secret；镜像上传仍需要本机 Docker daemon 可用，并通过 `ACR_PASSWORD` 等环境变量提供 registry 密码。
+- 触发包含 `build` / `upload` 的真实流水线时会先做前置校验：缺少 `EXECUTOR=tekton`、`TEKTON_SOURCE_PVC`、当前命令模式需要的打包脚本或手输打包命令、真实产物目录、非镜像包上传端点、目标路径、上传服务连接、镜像 registry/namespace/name/tag、Dockerfile/context、或 docker-registry Secret 时，API 会直接返回缺失项，不再进入假成功流程。
 - 控制面会把 pipeline、run、artifact、release、approval、audit 等状态落盘到 `DEPLOYMENT_DATA_DIR`，并使用稳定随机 ID，避免 API 重启后复用 `run-1` / `artifact-1` 这类旧编号。
 - 如果要接入 Supabase，先在 Supabase SQL Editor 执行 `supabase/migrations/20260518_domain_storage_tables.sql`，再设置 `DEPLOYMENT_STORAGE=supabase`、`SUPABASE_URL`、`SUPABASE_SERVICE_ROLE_KEY`。已有 `.deploy-data/*.json` 时先用 PowerShell 执行 `$env:DRY_RUN="true"; pnpm migrate:storage:supabase` 检查记录数量，再清掉 `DRY_RUN` 并执行 `pnpm migrate:storage:supabase` 一次性迁移。service role key 只给 Nest API 使用，不进入 Next.js 前端。旧的 `20260514_deployment_records.sql` / `20260518_release_records_indexes.sql` 只保留给已经试运行过的通用 JSONB 单表迁移做兼容参考。
 - Supabase 模式会按业务域写入不同表：`dm_applications`、`dm_source_repositories`、`dm_pipelines`、`dm_pipeline_runs`、`dm_run_events`、`dm_artifacts`、`dm_releases`、`dm_deployment_targets`、`dm_environment_locks`、`dm_release_plans`、`dm_release_executions`、`dm_release_events`、`dm_approvals`、`dm_webhook_deliveries`、`dm_audit_events`、`dm_environments`、`dm_runner_pools`。Webhook 去重、灰度推进、暂停、恢复、全量、回滚、失败都会生成独立业务记录。
 - 控制面 RBAC 是最小角色模型：`viewer` 可读，`member` 可触发运行、审批、上线、预检和修改配置，`admin` 额外允许删除流水线。默认本地开发不强制 token；生产或 `CONTROL_PLANE_AUTH_REQUIRED=true` 必须携带 `Authorization: Bearer <CONTROL_PLANE_API_TOKEN>`、`x-control-plane-token`，或由 `CONTROL_PLANE_JWT_SECRET` 校验通过的 HS256 JWT。
 - API 启动时会向上查找并加载 `.env`；已有 shell 环境变量优先级更高，不会被 `.env` 覆盖。`.env` 已在 `.gitignore` 中，适合放本机 service role key。
 - 真实打包/上传会在创建 run 前解析分支或 Tag 对应的真实 commit；如果 provider 暂不支持或 GitCode 缺少令牌，会直接报错要求补充 commit/token，不再用随机 commit 生成镜像 Tag。
-- inline 正式流程按顺序执行：`git clone/checkout` → `pnpm/npm/yarn run <packageBuildScript>` → `docker build` → `docker push`，并把 registry 返回的 digest 回写为真实镜像产物。
+- inline 正式流程按顺序执行：`git clone/checkout` → 按 `PACKAGE_BUILD_COMMAND_MODE` 执行手输打包命令或 `pnpm/npm/yarn run <PACKAGE_BUILD_SCRIPT>` → 非镜像包上传或 `docker build` → `docker push`，并把包 URI/public URL 或 registry digest 回写为真实 artifact。
 - 镜像上传不再使用固定占位仓库：流水线配置里的 `imageArtifact.registryProvider / registryUrl / namespace / imageName / tagTemplate` 会解析为 `REGISTRY_PROVIDER` 和 `IMAGE_REF`，传给 Tekton；inline 上传任务使用 Docker CLI + DinD sidecar 将镜像推送到该完整地址。Tekton namespace 需要允许 privileged sidecar。
 - 镜像托管是 preset 配置模式：当前支持 `aliyun-acr`、`harbor`、`docker-hub`、`tencent-tcr`、`aws-ecr`、`custom`；后续新增镜像托管时在 shared preset 中补默认 registry、secret、service connection 即可接入 UI 和运行参数。
+- 非镜像包上传使用 `packageUpload` 配置：`provider` 支持 `local-filesystem`、`oss`、`static-server`、`custom`；`endpoint` 可填写 `oss://bucket/prefix`、`https://static.example.com/releases`、`file://...` 或本地路径；`publicBaseUrl` / `accessDomain` 用于生成访问 URL；`targetPathTemplate` 支持 `${application.id}`、`${environment}`、`${run.id}`、`${artifact.name}` 等运行期占位；`customUploadCommandMode=custom` 时 `customUploadCommand` 接管实际 OSS CLI、rsync、scp 或自建上传脚本，`provider` 模式会保留但不执行手输命令。
+- 自定义环境变量继续复用 pipeline 变量表，并按 `injectionTiming` / `targetStages` 注入到 build、upload、deploy 等真实子进程。保留 `runtime.` 前缀时会剥离前缀后作为环境变量名注入；内置参数和敏感值不会被当成普通变量泄漏到日志。
 - 默认接入阿里云 ACR：`crpi-yjy3pqx1wqed2s2s.cn-hangzhou.personal.cr.aliyuncs.com/company_sy/deploy`，VPC 内网地址为 `crpi-yjy3pqx1wqed2s2s-vpc.cn-hangzhou.personal.cr.aliyuncs.com`。
 - 在 Tekton namespace 中创建 docker-registry Secret 后即可真实推送；密码使用阿里云 Container Registry 的访问凭证密码，不是控制台登录密码：
   `kubectl -n <namespace> create secret docker-registry aliyun-acr-deploy-secret --docker-server=crpi-yjy3pqx1wqed2s2s.cn-hangzhou.personal.cr.aliyuncs.com --docker-username=songyu19960525 --docker-password=<ACR 登录密码> --dry-run=client -o yaml | kubectl apply -f -`

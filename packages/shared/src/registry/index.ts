@@ -1,4 +1,4 @@
-import type { LifecycleStageKey, PipelineDefinition, PipelineRun } from "../platform";
+import type { LifecycleStageKey, PackageMode, PackageUploadConfig, PipelineDefinition, PipelineRun } from "../platform";
 
 export const IMAGE_REGISTRY_PROVIDERS = [
   "aliyun-acr",
@@ -52,6 +52,36 @@ export function ensureRegistryUploadStage(
   imageArtifact?: Pick<ImageArtifactConfig, "registryUrl" | "namespace" | "imageName" | "tagTemplate" | "serviceConnection">,
 ): LifecycleStageKey[] {
   if (!shouldAutoIncludeRegistryUpload(imageArtifact) || !stages.includes("build") || stages.includes("upload")) {
+    return stages;
+  }
+  const buildIndex = stages.indexOf("build");
+  return [...stages.slice(0, buildIndex + 1), "upload", ...stages.slice(buildIndex + 1)];
+}
+
+export function shouldAutoIncludePackageUpload(
+  packageMode: PackageMode | undefined,
+  packageUpload?: Pick<PackageUploadConfig, "endpoint" | "serviceConnection">,
+): boolean {
+  return Boolean(
+    packageMode &&
+      packageMode !== "container_image" &&
+      packageUpload?.endpoint.trim() &&
+      packageUpload.serviceConnection.trim(),
+  );
+}
+
+export function ensureArtifactUploadStage(
+  stages: LifecycleStageKey[],
+  options: {
+    packageMode?: PackageMode;
+    imageArtifact?: Pick<ImageArtifactConfig, "registryUrl" | "namespace" | "imageName" | "tagTemplate" | "serviceConnection">;
+    packageUpload?: Pick<PackageUploadConfig, "endpoint" | "serviceConnection">;
+  },
+): LifecycleStageKey[] {
+  if (options.packageMode === "container_image") {
+    return ensureRegistryUploadStage(stages, options.imageArtifact);
+  }
+  if (!shouldAutoIncludePackageUpload(options.packageMode, options.packageUpload) || !stages.includes("build") || stages.includes("upload")) {
     return stages;
   }
   const buildIndex = stages.indexOf("build");

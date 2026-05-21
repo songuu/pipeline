@@ -87,8 +87,8 @@ function PipelineFlowCanvasInner({
         height: "100%",
         minHeight,
         overflow: "hidden",
-        background: "var(--soft, #f9fbfd)",
-        border: "1px solid var(--line, #e5eaf0)",
+        background: "var(--pipeline-flow-background, var(--soft, #f9fbfd))",
+        border: "1px solid var(--pipeline-flow-border, var(--line, #e5eaf0))",
         borderRadius: 12,
         position: "relative",
       }}
@@ -108,7 +108,7 @@ function PipelineFlowCanvasInner({
         fitViewOptions={{ padding: 0.15 }}
         proOptions={{ hideAttribution: true }}
       >
-        <Background variant={BackgroundVariant.Dots} gap={18} size={1} color="#d8e0ea" />
+        <Background variant={BackgroundVariant.Dots} gap={18} size={1} color="var(--pipeline-flow-dot, #d8e0ea)" />
         <Controls showInteractive={false} position="bottom-right" />
       </ReactFlow>
       <style>{`@keyframes pipeline-flow-pulse {

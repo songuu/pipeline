@@ -1,18 +1,22 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import {
   type Application,
+  DEFAULT_PACKAGE_UPLOAD_CONFIG,
   defaultImageArtifactConfig,
   DEFAULT_PIPELINE_BUILD_CONFIG,
   IMAGE_REGISTRY_PRESETS,
   type ImageArtifactConfig,
   LIFECYCLE_STAGES,
-  ensureRegistryUploadStage,
+  ensureArtifactUploadStage,
   type GlobalParam,
   type LifecycleStageKey,
   type PipelineBuildConfig,
   type PipelineDefinition,
+  type PackageUploadConfig,
   type PipelineSourcePolicy,
   type SourceRepository,
+  resolvePackageBuildCommandMode,
+  resolvePackageUploadCommandMode,
 } from "@deploy-management/shared";
 import { ApplicationsService } from "../applications/applications.service";
 import { CodeReposService } from "../code-repos/code-repos.service";
@@ -58,7 +62,14 @@ export class PipelinesService {
           request.serviceConnections?.[1],
         )
       : undefined;
-    const stages = this.normalizeStages(ensureRegistryUploadStage(request.stages, imageArtifact));
+    const packageUpload = buildConfig.packageMode === "container_image"
+      ? undefined
+      : normalizePackageUpload(request.packageUpload, application.id, repository.name);
+    const stages = this.normalizeStages(ensureArtifactUploadStage(request.stages, {
+      packageMode: buildConfig.packageMode,
+      imageArtifact,
+      packageUpload,
+    }));
 
     const pipeline: PipelineDefinition = {
       id: createStableId("pipe"),
@@ -83,6 +94,7 @@ export class PipelinesService {
       serviceConnections: request.serviceConnections ?? defaultServiceConnections(repository.provider),
       buildConfig,
       imageArtifact,
+      packageUpload,
     };
 
     await this.repo.prepend(pipeline);
@@ -119,6 +131,13 @@ export class PipelinesService {
           request.serviceConnections?.[1] ?? current.serviceConnections?.[1],
         )
       : undefined;
+    const packageUpload = buildConfig.packageMode === "container_image"
+      ? undefined
+      : normalizePackageUpload(
+          request.packageUpload ?? current.packageUpload,
+          current.applicationId,
+          repository.name,
+        );
 
     const patch: Partial<PipelineDefinition> = {
       name: request.name?.trim() || current.name,
@@ -132,7 +151,11 @@ export class PipelinesService {
       strategy: request.strategy ?? current.strategy,
       canaryPercent: request.canaryPercent ?? current.canaryPercent,
       requiresApproval: request.requiresApproval ?? current.requiresApproval,
-      stages: this.normalizeStages(ensureRegistryUploadStage(request.stages ?? current.stages, imageArtifact)),
+      stages: this.normalizeStages(ensureArtifactUploadStage(request.stages ?? current.stages, {
+        packageMode: buildConfig.packageMode,
+        imageArtifact,
+        packageUpload,
+      })),
       triggers: request.triggers ? normalizeTriggers(request.triggers) : current.triggers,
       owner: request.owner?.trim() || current.owner,
       variables: request.variables ?? current.variables ?? defaultVariables(current.targetEnvironment),
@@ -141,6 +164,7 @@ export class PipelinesService {
       serviceConnections: request.serviceConnections ?? current.serviceConnections ?? defaultServiceConnections(repository.provider),
       buildConfig,
       imageArtifact,
+      packageUpload,
     };
 
     return this.repo.update(id, patch);
@@ -366,6 +390,11 @@ function normalizeImageArtifact(
 
 function normalizeBuildConfig(input: PipelineBuildConfig | undefined): PipelineBuildConfig {
   const script = input?.packageBuildScript?.trim() || DEFAULT_PIPELINE_BUILD_CONFIG.packageBuildScript;
+  const command = input?.packageBuildCommand?.trim();
+  const commandMode = resolvePackageBuildCommandMode({
+    packageBuildCommandMode: input?.packageBuildCommandMode,
+    packageBuildCommand: command,
+  });
   const outputPaths = Array.from(
     new Set(
       (input?.packageOutputPaths?.length ? input.packageOutputPaths : DEFAULT_PIPELINE_BUILD_CONFIG.packageOutputPaths)
@@ -376,7 +405,36 @@ function normalizeBuildConfig(input: PipelineBuildConfig | undefined): PipelineB
   return {
     packageMode: input?.packageMode ?? DEFAULT_PIPELINE_BUILD_CONFIG.packageMode,
     runtime: input?.runtime ?? DEFAULT_PIPELINE_BUILD_CONFIG.runtime,
+    contextPath: input?.contextPath?.trim() || DEFAULT_PIPELINE_BUILD_CONFIG.contextPath,
+    packageBuildCommandMode: commandMode,
     packageBuildScript: script,
+    ...(command ? { packageBuildCommand: command } : {}),
     packageOutputPaths: outputPaths.length > 0 ? outputPaths : DEFAULT_PIPELINE_BUILD_CONFIG.packageOutputPaths,
+  };
+}
+
+function normalizePackageUpload(
+  input: PackageUploadConfig | undefined,
+  applicationId: string,
+  repositoryName: string,
+): PackageUploadConfig {
+  const targetPathTemplate =
+    input?.targetPathTemplate?.trim() ||
+    DEFAULT_PACKAGE_UPLOAD_CONFIG.targetPathTemplate;
+  const command = input?.customUploadCommand?.trim();
+  const commandMode = resolvePackageUploadCommandMode({
+    provider: input?.provider ?? DEFAULT_PACKAGE_UPLOAD_CONFIG.provider,
+    customUploadCommandMode: input?.customUploadCommandMode,
+    customUploadCommand: command,
+  });
+  return {
+    provider: input?.provider ?? DEFAULT_PACKAGE_UPLOAD_CONFIG.provider,
+    customUploadCommandMode: commandMode,
+    endpoint: input?.endpoint?.trim() || DEFAULT_PACKAGE_UPLOAD_CONFIG.endpoint,
+    publicBaseUrl: input?.publicBaseUrl?.trim() || input?.accessDomain?.trim(),
+    accessDomain: input?.accessDomain?.trim() || input?.publicBaseUrl?.trim(),
+    targetPathTemplate,
+    serviceConnection: input?.serviceConnection?.trim() || DEFAULT_PACKAGE_UPLOAD_CONFIG.serviceConnection,
+    ...(command ? { customUploadCommand: command } : {}),
   };
 }

@@ -215,7 +215,7 @@ func (t *TektonBackend) Preflight(ctx context.Context, request domain.PreflightR
 				t.checkNamespacedResource(ctx, persistentVolumeClaimResource, namespace, sourcePVC, "workspace.source-pvc", "PersistentVolumeClaim", &checks)
 			}
 		}
-		if stages(*run)["upload"] {
+		if stages(*run)["upload"] && packageMode(*run) == "container_image" {
 			secret := firstNonEmpty(request.DockerSecret, dockerSecretName(*run))
 			if secret == "" {
 				addCheck("registry.docker-secret", "failed", "upload 阶段需要 docker-registry Secret，但未配置。", "创建 kubernetes.io/dockerconfigjson Secret，并在 REGISTRY_DOCKER_SECRET 或 TEKTON_DOCKER_SECRET 中引用。")
@@ -230,6 +230,16 @@ func (t *TektonBackend) Preflight(ctx context.Context, request domain.PreflightR
 				addCheck("param."+strings.ToLower(requiredParam), "failed", fmt.Sprintf("缺少运行参数 %s。", requiredParam), "检查流水线 buildConfig/imageArtifact 配置。")
 			} else {
 				addCheck("param."+strings.ToLower(requiredParam), "passed", fmt.Sprintf("运行参数 %s 已配置。", requiredParam), "")
+			}
+		}
+		if stages(*run)["build"] || stages(*run)["upload"] {
+			buildMode := packageBuildCommandMode(*run)
+			if buildMode == "custom" && globalParamValue(*run, "PACKAGE_BUILD_COMMAND") == "" {
+				addCheck("param.package_build", "failed", "已选择手输打包命令，但 PACKAGE_BUILD_COMMAND 为空。", "填写 PACKAGE_BUILD_COMMAND 或切回 PACKAGE_BUILD_COMMAND_MODE=script。")
+			} else if buildMode == "script" && globalParamValue(*run, "PACKAGE_BUILD_SCRIPT") == "" {
+				addCheck("param.package_build", "failed", "已选择 package.json 脚本打包，但 PACKAGE_BUILD_SCRIPT 为空。", "填写 PACKAGE_BUILD_SCRIPT 或切换到 PACKAGE_BUILD_COMMAND_MODE=custom。")
+			} else {
+				addCheck("param.package_build", "passed", "打包入口已配置。", "")
 			}
 		}
 	}
@@ -299,8 +309,12 @@ func (t *TektonBackend) validatePrerequisites(ctx context.Context, input domain.
 		if value := globalParamValue(input, "BUILD_CONTEXT"); value == "" {
 			return fmt.Errorf("missing BUILD_CONTEXT: real package build needs a repository-relative build context")
 		}
-		if value := globalParamValue(input, "PACKAGE_BUILD_SCRIPT"); value == "" {
-			return fmt.Errorf("missing PACKAGE_BUILD_SCRIPT: real package build needs a package.json script name, for example build or build:prod")
+		buildMode := packageBuildCommandMode(input)
+		if buildMode == "custom" && globalParamValue(input, "PACKAGE_BUILD_COMMAND") == "" {
+			return fmt.Errorf("missing PACKAGE_BUILD_COMMAND: PACKAGE_BUILD_COMMAND_MODE=custom requires a typed command")
+		}
+		if buildMode == "script" && globalParamValue(input, "PACKAGE_BUILD_SCRIPT") == "" {
+			return fmt.Errorf("missing PACKAGE_BUILD_SCRIPT: PACKAGE_BUILD_COMMAND_MODE=script requires a package.json script name")
 		}
 		if value := globalParamValue(input, "PACKAGE_OUTPUT_PATHS"); value == "" {
 			return fmt.Errorf("missing PACKAGE_OUTPUT_PATHS: real package build needs at least one output path, for example .next or dist")
@@ -308,15 +322,30 @@ func (t *TektonBackend) validatePrerequisites(ctx context.Context, input domain.
 	}
 
 	if stageSet["upload"] {
-		if value := globalParamValue(input, "IMAGE_REF"); value == "" {
-			return fmt.Errorf("missing IMAGE_REF: real image upload needs a full registry/repository:tag reference")
-		}
-		if value := globalParamValue(input, "DOCKERFILE_PATH"); value == "" {
-			return fmt.Errorf("missing DOCKERFILE_PATH: real image upload needs a repository-relative Dockerfile path")
-		}
-		if secret := dockerSecretName(input); secret != "" {
-			if err := t.requireDockerConfigSecret(ctx, input, secret); err != nil {
-				return err
+		if packageMode(input) == "container_image" {
+			if value := globalParamValue(input, "IMAGE_REF"); value == "" {
+				return fmt.Errorf("missing IMAGE_REF: real image upload needs a full registry/repository:tag reference")
+			}
+			if value := globalParamValue(input, "DOCKERFILE_PATH"); value == "" {
+				return fmt.Errorf("missing DOCKERFILE_PATH: real image upload needs a repository-relative Dockerfile path")
+			}
+			if secret := dockerSecretName(input); secret != "" {
+				if err := t.requireDockerConfigSecret(ctx, input, secret); err != nil {
+					return err
+				}
+			}
+		} else {
+			if !stageSet["build"] {
+				return fmt.Errorf("missing build stage: package upload needs a build artifact produced by the build task")
+			}
+			if value := globalParamValue(input, "PACKAGE_UPLOAD_ENDPOINT"); value == "" {
+				return fmt.Errorf("missing PACKAGE_UPLOAD_ENDPOINT: package upload needs an OSS/static-server/local endpoint")
+			}
+			if value := globalParamValue(input, "PACKAGE_UPLOAD_TARGET_PATH"); value == "" {
+				return fmt.Errorf("missing PACKAGE_UPLOAD_TARGET_PATH: package upload needs a target object path")
+			}
+			if packageUploadCommandMode(input) == "custom" && globalParamValue(input, "PACKAGE_UPLOAD_COMMAND") == "" {
+				return fmt.Errorf("missing PACKAGE_UPLOAD_COMMAND: PACKAGE_UPLOAD_COMMAND_MODE=custom requires a typed upload command")
 			}
 		}
 	}
@@ -506,10 +535,14 @@ func requiredBuildParams(input domain.StartRunInput) []string {
 	stageSet := stages(input)
 	required := []string{}
 	if stageSet["build"] || stageSet["upload"] {
-		required = append(required, "BUILD_CONTEXT", "PACKAGE_BUILD_SCRIPT", "PACKAGE_OUTPUT_PATHS")
+		required = append(required, "BUILD_CONTEXT", "PACKAGE_OUTPUT_PATHS")
 	}
 	if stageSet["upload"] {
-		required = append(required, "IMAGE_REF", "DOCKERFILE_PATH")
+		if packageMode(input) == "container_image" {
+			required = append(required, "IMAGE_REF", "DOCKERFILE_PATH")
+		} else {
+			required = append(required, "PACKAGE_UPLOAD_ENDPOINT", "PACKAGE_UPLOAD_TARGET_PATH")
+		}
 	}
 	return required
 }
@@ -885,7 +918,10 @@ func (t *TektonBackend) inlineTask(stage string, input domain.StartRunInput) map
 		return t.inlineBuildTask(input)
 	}
 	if stage == "upload" {
-		return t.inlineImageUploadTask(input)
+		if packageMode(input) == "container_image" {
+			return t.inlineImageUploadTask(input)
+		}
+		return t.inlinePackageUploadTask(input)
 	}
 	return map[string]interface{}{
 		"name": stage,
@@ -965,7 +1001,7 @@ func (t *TektonBackend) inlineSourceTask(input domain.StartRunInput) map[string]
 }
 
 func (t *TektonBackend) inlineBuildTask(input domain.StartRunInput) map[string]interface{} {
-	params := []string{"BUILD_CONTEXT", "PACKAGE_BUILD_SCRIPT", "PACKAGE_OUTPUT_PATHS"}
+	params := []string{"BUILD_CONTEXT", "PACKAGE_BUILD_COMMAND_MODE", "PACKAGE_BUILD_SCRIPT", "PACKAGE_BUILD_COMMAND", "PACKAGE_OUTPUT_PATHS"}
 	task := map[string]interface{}{
 		"name":   "build",
 		"params": taskParamBindings(params),
@@ -979,34 +1015,46 @@ func (t *TektonBackend) inlineBuildTask(input domain.StartRunInput) map[string]i
 				map[string]interface{}{
 					"name":  "node-package-build",
 					"image": t.nodeImage,
+					"env":   tektonEnvForStage(input, "build"),
 					"script": strings.Join([]string{
 						"#!/bin/sh",
 						"set -eu",
 						"root=\"$(workspaces.source-ws.path)\"",
 						"context=\"$root/$(params.BUILD_CONTEXT)\"",
+						"command_mode=\"$(params.PACKAGE_BUILD_COMMAND_MODE)\"",
 						"script_name=\"$(params.PACKAGE_BUILD_SCRIPT)\"",
+						"build_command=\"$(params.PACKAGE_BUILD_COMMAND)\"",
 						"output_paths=\"$(printf '%s' \"$(params.PACKAGE_OUTPUT_PATHS)\" | tr ',' ' ')\"",
+						"[ -n \"$command_mode\" ] || { if [ -n \"$build_command\" ]; then command_mode=custom; else command_mode=script; fi; }",
 						"cd \"$context\"",
 						"artifact_dir=\"$root/.deploy-artifacts\"",
 						"mkdir -p \"$artifact_dir\"",
 						"package=\"$artifact_dir/build.tar.gz\"",
-						"[ -f package.json ] || { echo 'package.json is required for inline Node.js package build' >&2; exit 1; }",
-						"[ -n \"$script_name\" ] || { echo 'PACKAGE_BUILD_SCRIPT is required' >&2; exit 1; }",
-						"[ -n \"$output_paths\" ] || { echo 'PACKAGE_OUTPUT_PATHS is required' >&2; exit 1; }",
-						"node -e \"const p=require('./package.json'); const s=process.argv[1]; if (!p.scripts || !p.scripts[s]) { console.error('package.json scripts.' + s + ' is required for real package build'); process.exit(1) }\" \"$script_name\"",
-						"corepack enable >/dev/null 2>&1 || true",
-						"if [ -f pnpm-lock.yaml ]; then",
-						"  pnpm install --frozen-lockfile",
-						"  pnpm run \"$script_name\"",
-						"elif [ -f package-lock.json ]; then",
-						"  npm ci",
-						"  npm run \"$script_name\"",
-						"elif [ -f yarn.lock ]; then",
-						"  yarn install --frozen-lockfile || yarn install --immutable",
-						"  yarn run \"$script_name\"",
+						"if [ \"$command_mode\" != \"custom\" ]; then",
+						"  [ -f package.json ] || { echo 'package.json is required for inline Node.js package build' >&2; exit 1; }",
+						"  [ -n \"$script_name\" ] || { echo 'PACKAGE_BUILD_SCRIPT is required' >&2; exit 1; }",
 						"else",
-						"  npm install",
-						"  npm run \"$script_name\"",
+						"  [ -n \"$build_command\" ] || { echo 'PACKAGE_BUILD_COMMAND is required when PACKAGE_BUILD_COMMAND_MODE=custom' >&2; exit 1; }",
+						"fi",
+						"[ -n \"$output_paths\" ] || { echo 'PACKAGE_OUTPUT_PATHS is required' >&2; exit 1; }",
+						"if [ \"$command_mode\" = \"custom\" ]; then",
+						"  sh -lc \"$build_command\"",
+						"else",
+						"  node -e \"const p=require('./package.json'); const s=process.argv[1]; if (!p.scripts || !p.scripts[s]) { console.error('package.json scripts.' + s + ' is required for real package build'); process.exit(1) }\" \"$script_name\"",
+						"  corepack enable >/dev/null 2>&1 || true",
+						"  if [ -f pnpm-lock.yaml ]; then",
+						"    pnpm install --frozen-lockfile",
+						"    pnpm run \"$script_name\"",
+						"  elif [ -f package-lock.json ]; then",
+						"    npm ci",
+						"    npm run \"$script_name\"",
+						"  elif [ -f yarn.lock ]; then",
+						"    yarn install --frozen-lockfile || yarn install --immutable",
+						"    yarn run \"$script_name\"",
+						"  else",
+						"    npm install",
+						"    npm run \"$script_name\"",
+						"  fi",
 						"fi",
 						"outputs=\"\"",
 						"for dir in $output_paths; do",
@@ -1137,6 +1185,103 @@ func (t *TektonBackend) inlineImageUploadTask(input domain.StartRunInput) map[st
 				"image":  t.stageImage,
 				"script": "echo 'IMAGE_REF is required for real image upload' >&2\nexit 1",
 			},
+		}
+	}
+	return task
+}
+
+func (t *TektonBackend) inlinePackageUploadTask(input domain.StartRunInput) map[string]interface{} {
+	params := []string{
+		"PACKAGE_MODE",
+		"PACKAGE_UPLOAD_PROVIDER",
+		"PACKAGE_UPLOAD_ENDPOINT",
+		"PACKAGE_UPLOAD_PUBLIC_BASE_URL",
+		"PACKAGE_UPLOAD_ACCESS_DOMAIN",
+		"PACKAGE_UPLOAD_TARGET_PATH",
+		"PACKAGE_UPLOAD_COMMAND_MODE",
+		"PACKAGE_UPLOAD_COMMAND",
+	}
+	task := map[string]interface{}{
+		"name":   "upload",
+		"params": taskParamBindings(params),
+		"taskSpec": map[string]interface{}{
+			"params": taskParamSpecs(params),
+			"results": []interface{}{
+				map[string]interface{}{"name": "package-path", "description": "package path produced by build task"},
+				map[string]interface{}{"name": "package-digest", "description": "sha256 digest of the uploaded package"},
+				map[string]interface{}{"name": "package-uri", "description": "storage URI of the uploaded package"},
+				map[string]interface{}{"name": "package-public-url", "description": "public URL or custom access domain for the package"},
+				map[string]interface{}{"name": "package-storage-provider", "description": "package upload provider"},
+			},
+			"steps": []interface{}{
+				map[string]interface{}{
+					"name":  "package-upload",
+					"image": t.stageImage,
+					"env":   tektonEnvForStage(input, "upload"),
+					"script": strings.Join([]string{
+						"#!/bin/sh",
+						"set -eu",
+						"root=\"$(workspaces.source-ws.path)\"",
+						"package=\"$(tasks.build.results.package-path)\"",
+						"digest=\"$(tasks.build.results.package-digest)\"",
+						"provider=\"$(params.PACKAGE_UPLOAD_PROVIDER)\"",
+						"endpoint=\"$(params.PACKAGE_UPLOAD_ENDPOINT)\"",
+						"target_path=\"$(params.PACKAGE_UPLOAD_TARGET_PATH)\"",
+						"public_base=\"$(params.PACKAGE_UPLOAD_PUBLIC_BASE_URL)\"",
+						"access_domain=\"$(params.PACKAGE_UPLOAD_ACCESS_DOMAIN)\"",
+						"command_mode=\"$(params.PACKAGE_UPLOAD_COMMAND_MODE)\"",
+						"upload_command=\"$(params.PACKAGE_UPLOAD_COMMAND)\"",
+						"if [ \"$provider\" = \"custom\" ]; then command_mode=custom; fi",
+						"[ -n \"$command_mode\" ] || { if [ -n \"$upload_command\" ]; then command_mode=custom; else command_mode=provider; fi; }",
+						"[ -f \"$package\" ] || { echo \"package artifact not found: $package\" >&2; exit 1; }",
+						"[ -n \"$endpoint\" ] || { echo 'PACKAGE_UPLOAD_ENDPOINT is required for package upload' >&2; exit 1; }",
+						"[ -n \"$target_path\" ] || { echo 'PACKAGE_UPLOAD_TARGET_PATH is required for package upload' >&2; exit 1; }",
+						"mirror=\"$root/.package-uploads/$target_path\"",
+						"mkdir -p \"$(dirname \"$mirror\")\"",
+						"cp \"$package\" \"$mirror\"",
+						"case \"$endpoint\" in",
+						"  http://*|https://*|oss://*) package_uri=\"${endpoint%/}/$target_path\" ;;",
+						"  *) package_uri=\"file://$mirror\" ;;",
+						"esac",
+						"public_prefix=\"$public_base\"",
+						"[ -n \"$public_prefix\" ] || public_prefix=\"$access_domain\"",
+						"if [ -n \"$public_prefix\" ]; then",
+						"  public_url=\"${public_prefix%/}/$target_path\"",
+						"elif echo \"$endpoint\" | grep -Eq '^https?://'; then",
+						"  public_url=\"${endpoint%/}/$target_path\"",
+						"else",
+						"  public_url=\"$package_uri\"",
+						"fi",
+						"export PACKAGE_MODE=\"$(params.PACKAGE_MODE)\"",
+						"export PACKAGE_UPLOAD_PROVIDER=\"$provider\"",
+						"export PACKAGE_UPLOAD_ENDPOINT=\"$endpoint\"",
+						"export PACKAGE_UPLOAD_TARGET_PATH=\"$target_path\"",
+						"export PACKAGE_ARCHIVE_PATH=\"$package\"",
+						"export PACKAGE_MIRROR_PATH=\"$mirror\"",
+						"export PACKAGE_DIGEST=\"$digest\"",
+						"export PACKAGE_URI=\"$package_uri\"",
+						"export PACKAGE_PUBLIC_URL=\"$public_url\"",
+						"if [ \"$command_mode\" = \"custom\" ]; then",
+						"  [ -n \"$upload_command\" ] || { echo 'PACKAGE_UPLOAD_COMMAND is required when PACKAGE_UPLOAD_COMMAND_MODE=custom' >&2; exit 1; }",
+						"  sh -lc \"$upload_command\"",
+						"fi",
+						"printf '%s' \"$package\" > \"$(results.package-path.path)\"",
+						"printf '%s' \"$digest\" > \"$(results.package-digest.path)\"",
+						"printf '%s' \"$package_uri\" > \"$(results.package-uri.path)\"",
+						"printf '%s' \"$public_url\" > \"$(results.package-public-url.path)\"",
+						"printf '%s' \"$provider\" > \"$(results.package-storage-provider.path)\"",
+					}, "\n"),
+				},
+			},
+		},
+	}
+	if hasWorkspaceBinding(input, "source-ws") {
+		task["workspaces"] = []interface{}{
+			map[string]interface{}{"name": "source-ws", "workspace": "source-ws"},
+		}
+		taskSpec := task["taskSpec"].(map[string]interface{})
+		taskSpec["workspaces"] = []interface{}{
+			map[string]interface{}{"name": "source-ws", "description": "source workspace carrying package artifacts"},
 		}
 	}
 	return task
@@ -1592,6 +1737,96 @@ func dockerStepEnv() []interface{} {
 	}
 }
 
+func tektonEnvForStage(input domain.StartRunInput, stage string) []interface{} {
+	reserved := map[string]bool{
+		"ENVIRONMENT":                       true,
+		"CANARY_PERCENT":                    true,
+		"COMMIT":                            true,
+		"REF_TYPE":                          true,
+		"REF_NAME":                          true,
+		"REGISTRY_PROVIDER":                 true,
+		"IMAGE_REGISTRY":                    true,
+		"IMAGE_REPOSITORY":                  true,
+		"IMAGE_NAME":                        true,
+		"IMAGE_NAMESPACE":                   true,
+		"IMAGE_TAG":                         true,
+		"IMAGE_REF":                         true,
+		"DOCKERFILE_PATH":                   true,
+		"BUILD_CONTEXT":                     true,
+		"BUILD_RUNTIME":                     true,
+		"REGISTRY_SERVICE_CONNECTION":       true,
+		"REGISTRY_USERNAME":                 true,
+		"REGISTRY_DOCKER_SECRET":            true,
+		"PACKAGE_MODE":                      true,
+		"PACKAGE_BUILD_COMMAND_MODE":        true,
+		"PACKAGE_BUILD_SCRIPT":              true,
+		"PACKAGE_BUILD_COMMAND":             true,
+		"PACKAGE_OUTPUT_PATHS":              true,
+		"PACKAGE_UPLOAD_PROVIDER":           true,
+		"PACKAGE_UPLOAD_COMMAND_MODE":       true,
+		"PACKAGE_UPLOAD_ENDPOINT":           true,
+		"PACKAGE_UPLOAD_PUBLIC_BASE_URL":    true,
+		"PACKAGE_UPLOAD_ACCESS_DOMAIN":      true,
+		"PACKAGE_UPLOAD_TARGET_PATH":        true,
+		"PACKAGE_UPLOAD_SERVICE_CONNECTION": true,
+		"PACKAGE_UPLOAD_COMMAND":            true,
+	}
+	env := []interface{}{}
+	for _, param := range input.GlobalParams {
+		key := strings.TrimSpace(param.Key)
+		if key == "" || reserved[key] || strings.HasPrefix(key, "runtime.") || !isEnvName(key) {
+			continue
+		}
+		if shouldInjectParamIntoStage(param, stage) {
+			env = append(env, map[string]interface{}{"name": key, "value": param.Value})
+		}
+	}
+	for _, param := range input.GlobalParams {
+		key := strings.TrimSpace(param.Key)
+		if !strings.HasPrefix(key, "runtime.") {
+			continue
+		}
+		key = strings.TrimPrefix(key, "runtime.")
+		if key != "" && isEnvName(key) && shouldInjectParamIntoStage(param, stage) {
+			env = append(env, map[string]interface{}{"name": key, "value": param.Value})
+		}
+	}
+	return env
+}
+
+func shouldInjectParamIntoStage(param domain.GlobalParam, stage string) bool {
+	for _, target := range param.TargetStages {
+		if target == stage {
+			return true
+		}
+	}
+	switch param.InjectionTiming {
+	case "build":
+		return stage == "test" || stage == "build" || stage == "package"
+	case "deploy":
+		return stage == "deploy" || stage == "canary" || stage == "promote"
+	case "runtime":
+		return stage == "deploy" || stage == "canary" || stage == "approval" || stage == "promote"
+	default:
+		return stage == "test" || stage == "build"
+	}
+}
+
+func isEnvName(value string) bool {
+	if value == "" {
+		return false
+	}
+	for index, r := range value {
+		if index == 0 && !((r >= 'A' && r <= 'Z') || r == '_') {
+			return false
+		}
+		if !((r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_') {
+			return false
+		}
+	}
+	return true
+}
+
 func taskParamBindings(names []string) []interface{} {
 	params := make([]interface{}, 0, len(names))
 	for _, name := range names {
@@ -1621,6 +1856,35 @@ func globalParamValue(input domain.StartRunInput, key string) string {
 		}
 	}
 	return ""
+}
+
+func packageMode(input domain.StartRunInput) string {
+	return firstNonEmpty(globalParamValue(input, "PACKAGE_MODE"), "container_image")
+}
+
+func packageBuildCommandMode(input domain.StartRunInput) string {
+	mode := globalParamValue(input, "PACKAGE_BUILD_COMMAND_MODE")
+	if mode == "script" || mode == "custom" {
+		return mode
+	}
+	if globalParamValue(input, "PACKAGE_BUILD_COMMAND") != "" {
+		return "custom"
+	}
+	return "script"
+}
+
+func packageUploadCommandMode(input domain.StartRunInput) string {
+	if globalParamValue(input, "PACKAGE_UPLOAD_PROVIDER") == "custom" {
+		return "custom"
+	}
+	mode := globalParamValue(input, "PACKAGE_UPLOAD_COMMAND_MODE")
+	if mode == "provider" || mode == "custom" {
+		return mode
+	}
+	if globalParamValue(input, "PACKAGE_UPLOAD_COMMAND") != "" {
+		return "custom"
+	}
+	return "provider"
 }
 
 func stages(input domain.StartRunInput) map[string]bool {

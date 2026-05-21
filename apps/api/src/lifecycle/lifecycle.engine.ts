@@ -17,11 +17,13 @@ import {
   type StartRunInput,
   type TriggerRunRequest,
   resolveImageArtifact,
+  resolvePackageBuildCommandMode,
+  resolvePackageUploadCommandMode,
 } from "@deploy-management/shared";
 // LifecycleEngine 不再持有 simulated 行为；真实运行只走 ExecutorAdapter（local-docker / tekton）。
 // 历史的 simulateUntilGate 在 controller 与 dev seed 都不再调用，已于 sprint-1 清理。
 import { EXECUTOR_ADAPTER, type ExecutorAdapter } from "./executor-adapter";
-import { STAGE_DURATIONS, buildStageLogs } from "../executors/stage-templates";
+import { STAGE_DURATIONS, buildStageLogs, stageTitleForPipeline } from "../executors/stage-templates";
 
 const IMAGE_PARAM_KEYS = new Set([
   "REGISTRY_PROVIDER",
@@ -37,8 +39,19 @@ const IMAGE_PARAM_KEYS = new Set([
   "REGISTRY_SERVICE_CONNECTION",
   "REGISTRY_USERNAME",
   "REGISTRY_DOCKER_SECRET",
+  "PACKAGE_MODE",
+  "PACKAGE_BUILD_COMMAND_MODE",
   "PACKAGE_BUILD_SCRIPT",
+  "PACKAGE_BUILD_COMMAND",
   "PACKAGE_OUTPUT_PATHS",
+  "PACKAGE_UPLOAD_PROVIDER",
+  "PACKAGE_UPLOAD_COMMAND_MODE",
+  "PACKAGE_UPLOAD_ENDPOINT",
+  "PACKAGE_UPLOAD_PUBLIC_BASE_URL",
+  "PACKAGE_UPLOAD_ACCESS_DOMAIN",
+  "PACKAGE_UPLOAD_TARGET_PATH",
+  "PACKAGE_UPLOAD_SERVICE_CONNECTION",
+  "PACKAGE_UPLOAD_COMMAND",
 ]);
 
 /**
@@ -71,7 +84,7 @@ export class LifecycleEngine {
     const commit = input.resolvedCommit;
     const environment = input.request.environment ?? input.pipeline.targetEnvironment;
     const canaryPercent = input.request.canaryPercent ?? input.pipeline.canaryPercent;
-    const stages = input.pipeline.stages.map((key) => this.createStage(key, "pending"));
+    const stages = input.pipeline.stages.map((key) => this.createStage(key, "pending", input.pipeline));
 
     return {
       id: input.runId,
@@ -293,12 +306,12 @@ export class LifecycleEngine {
     return this.executor.backend;
   }
 
-  private createStage(key: LifecycleStageKey, status: StageStatus): PipelineStageRun {
+  private createStage(key: LifecycleStageKey, status: StageStatus, pipeline: PipelineDefinition): PipelineStageRun {
     const spec = getLifecycleStage(key);
     return {
       id: `stage-${key}`,
       key,
-      title: spec.title,
+      title: stageTitleForPipeline(key, pipeline),
       status,
       logs: [],
       metadata: {
@@ -309,8 +322,10 @@ export class LifecycleEngine {
   }
 
   private toStartRunInput(run: PipelineRun): StartRunInput {
-    const image = resolveImageArtifact(run.definitionSnapshot, run);
     const buildConfig = run.definitionSnapshot.buildConfig ?? DEFAULT_PIPELINE_BUILD_CONFIG;
+    const packageMode = buildConfig.packageMode ?? "container_image";
+    const image = packageMode === "container_image" ? resolveImageArtifact(run.definitionSnapshot, run) : undefined;
+    const packageUpload = run.definitionSnapshot.packageUpload;
     const variables: GlobalParam[] = [
       { key: "ENVIRONMENT", value: run.environment },
       { key: "CANARY_PERCENT", value: String(run.canaryPercent) },
@@ -323,21 +338,40 @@ export class LifecycleEngine {
         key: `runtime.${param.key}`,
         injectionTiming: param.injectionTiming ?? "runtime",
       })),
-      { key: "REGISTRY_PROVIDER", value: image.registryProvider ?? "custom" },
-      { key: "IMAGE_REGISTRY", value: image.registryUrl },
-      { key: "IMAGE_REPOSITORY", value: image.repository },
-      { key: "IMAGE_NAME", value: image.imageName },
-      { key: "IMAGE_NAMESPACE", value: image.namespace },
-      { key: "IMAGE_TAG", value: image.tag },
-      { key: "IMAGE_REF", value: image.imageRef },
-      { key: "DOCKERFILE_PATH", value: image.dockerfilePath },
-      { key: "BUILD_CONTEXT", value: image.contextPath },
+      { key: "PACKAGE_MODE", value: packageMode },
+      { key: "BUILD_CONTEXT", value: buildConfig.contextPath ?? image?.contextPath ?? "." },
       { key: "BUILD_RUNTIME", value: buildConfig.runtime ?? "node" },
-      { key: "REGISTRY_SERVICE_CONNECTION", value: image.serviceConnection },
-      { key: "REGISTRY_USERNAME", value: image.registryUsername ?? "" },
-      { key: "REGISTRY_DOCKER_SECRET", value: image.dockerConfigSecret ?? "" },
+      { key: "PACKAGE_BUILD_COMMAND_MODE", value: resolvePackageBuildCommandMode(buildConfig) },
       { key: "PACKAGE_BUILD_SCRIPT", value: buildConfig.packageBuildScript },
+      { key: "PACKAGE_BUILD_COMMAND", value: buildConfig.packageBuildCommand ?? "" },
       { key: "PACKAGE_OUTPUT_PATHS", value: buildConfig.packageOutputPaths.join(",") },
+      ...(image
+        ? [
+            { key: "REGISTRY_PROVIDER", value: image.registryProvider ?? "custom" },
+            { key: "IMAGE_REGISTRY", value: image.registryUrl },
+            { key: "IMAGE_REPOSITORY", value: image.repository },
+            { key: "IMAGE_NAME", value: image.imageName },
+            { key: "IMAGE_NAMESPACE", value: image.namespace },
+            { key: "IMAGE_TAG", value: image.tag },
+            { key: "IMAGE_REF", value: image.imageRef },
+            { key: "DOCKERFILE_PATH", value: image.dockerfilePath },
+            { key: "REGISTRY_SERVICE_CONNECTION", value: image.serviceConnection },
+            { key: "REGISTRY_USERNAME", value: image.registryUsername ?? "" },
+            { key: "REGISTRY_DOCKER_SECRET", value: image.dockerConfigSecret ?? "" },
+          ]
+        : []),
+      ...(packageUpload
+        ? [
+            { key: "PACKAGE_UPLOAD_PROVIDER", value: packageUpload.provider },
+            { key: "PACKAGE_UPLOAD_COMMAND_MODE", value: resolvePackageUploadCommandMode(packageUpload) },
+            { key: "PACKAGE_UPLOAD_ENDPOINT", value: packageUpload.endpoint },
+            { key: "PACKAGE_UPLOAD_PUBLIC_BASE_URL", value: packageUpload.publicBaseUrl ?? "" },
+            { key: "PACKAGE_UPLOAD_ACCESS_DOMAIN", value: packageUpload.accessDomain ?? "" },
+            { key: "PACKAGE_UPLOAD_TARGET_PATH", value: renderPackageUploadTarget(packageUpload.targetPathTemplate, run) },
+            { key: "PACKAGE_UPLOAD_SERVICE_CONNECTION", value: packageUpload.serviceConnection },
+            { key: "PACKAGE_UPLOAD_COMMAND", value: packageUpload.customUploadCommand ?? "" },
+          ]
+        : []),
     ];
     const source: PipelineSource = {
       id: run.repositoryId,
@@ -409,6 +443,9 @@ export class LifecycleEngine {
     const dockerPullCommand = firstNonEmpty(jobResult["docker-pull"], jobResult["DOCKER_PULL"]);
     const packagePath = firstNonEmpty(jobResult["package-path"], jobResult["PACKAGE_PATH"]);
     const packageDigest = firstNonEmpty(jobResult["package-digest"], jobResult["PACKAGE_DIGEST"]);
+    const packageUri = firstNonEmpty(jobResult["package-uri"], jobResult["PACKAGE_URI"]);
+    const packagePublicUrl = firstNonEmpty(jobResult["package-public-url"], jobResult["PACKAGE_PUBLIC_URL"]);
+    const packageStorageProvider = firstNonEmpty(jobResult["package-storage-provider"], jobResult["PACKAGE_STORAGE_PROVIDER"]);
     const executorError = firstNonEmpty(jobResult["error"], jobResult["ERROR"]);
     const startedAt =
       job?.startedAt ||
@@ -435,6 +472,9 @@ export class LifecycleEngine {
       ...(dockerPullCommand ? { dockerPullCommand } : {}),
       ...(packagePath ? { packagePath } : {}),
       ...(packageDigest ? { packageDigest } : {}),
+      ...(packageUri ? { packageUri } : {}),
+      ...(packagePublicUrl ? { packagePublicUrl } : {}),
+      ...(packageStorageProvider ? { packageStorageProvider } : {}),
       ...(executorError ? { executorError: truncateLogValue(executorError) } : {}),
     };
   }
@@ -492,3 +532,20 @@ const firstNonEmpty = (...values: Array<string | undefined>): string | undefined
   values.find((value) => Boolean(value?.trim()))?.trim();
 
 const truncateLogValue = (value: string): string => (value.length > 4_000 ? `${value.slice(0, 4_000)}...` : value);
+
+function renderPackageUploadTarget(template: string, run: PipelineRun): string {
+  const artifactName = `${run.id}.tar.gz`;
+  const values: Record<string, string> = {
+    "run.id": run.id,
+    "pipeline.id": run.pipelineId,
+    "pipeline.name": run.pipelineName,
+    "application.id": run.applicationId,
+    environment: run.environment,
+    "ref.name": run.refName,
+    commit: run.commit,
+    "commit.short": run.commit.slice(0, 8),
+    "artifact.name": artifactName,
+  };
+  const rendered = template.replace(/\$\{([^}]+)\}/g, (_, key: string) => values[key.trim()] ?? "unknown");
+  return rendered.replace(/\\/g, "/").replace(/^\/+/, "");
+}

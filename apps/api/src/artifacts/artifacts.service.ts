@@ -100,6 +100,28 @@ function buildStageArtifact(run: PipelineRun, stage: LifecycleStageKey): Artifac
     return undefined;
   }
   if (stage === "upload") {
+    if (run.definitionSnapshot.buildConfig?.packageMode && run.definitionSnapshot.buildConfig.packageMode !== "container_image") {
+      const uploadStage = run.stages.find((item) => item.key === "upload");
+      const packagePath = typeof uploadStage?.metadata.packagePath === "string" ? uploadStage.metadata.packagePath : "";
+      const packageDigest = typeof uploadStage?.metadata.packageDigest === "string" ? uploadStage.metadata.packageDigest : "";
+      const packageUri = typeof uploadStage?.metadata.packageUri === "string" ? uploadStage.metadata.packageUri : "";
+      const publicUrl = typeof uploadStage?.metadata.packagePublicUrl === "string" ? uploadStage.metadata.packagePublicUrl : "";
+      const storageProvider = typeof uploadStage?.metadata.packageStorageProvider === "string"
+        ? uploadStage.metadata.packageStorageProvider as Artifact["storageProvider"]
+        : run.definitionSnapshot.packageUpload?.provider;
+      if (!packageDigest || !packageUri) return undefined;
+      return {
+        ...base,
+        name: packagePath || packageUri,
+        type: "package",
+        digest: packageDigest,
+        size: "generated",
+        signed: false,
+        uri: packageUri,
+        publicUrl,
+        storageProvider,
+      };
+    }
     const imageDigest = realImageDigest(run);
     if (!imageDigest) return undefined;
     return {
@@ -110,6 +132,8 @@ function buildStageArtifact(run: PipelineRun, stage: LifecycleStageKey): Artifac
       digest: imageDigest,
       size: "218 MB",
       signed: run.executor?.backend === "tekton",
+      uri: image.imageRef,
+      storageProvider: image.registryProvider,
     };
   }
   if (stage === "promote") {

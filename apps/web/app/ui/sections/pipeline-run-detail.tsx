@@ -5,6 +5,8 @@ import { Check, Code2, Copy, MoreHorizontal, PackageCheck, Terminal, X } from "l
 import {
   DEFAULT_PIPELINE_BUILD_CONFIG,
   resolveImageArtifact,
+  shouldRunCustomPackageBuildCommand,
+  shouldRunCustomPackageUploadCommand,
   type LifecycleStageKey,
   type PipelineDefinition,
   type PipelineRun,
@@ -1589,7 +1591,11 @@ function plannedExecutionCommandsForStage({
   const outputPaths = buildConfig.packageOutputPaths.join(" ");
   const installCommand =
     "pnpm install --frozen-lockfile  # 若存在 pnpm-lock.yaml；否则 npm ci / yarn install --frozen-lockfile";
+  const customBuildCommand = shouldRunCustomPackageBuildCommand(buildConfig)
+    ? buildConfig.packageBuildCommand?.trim() ?? ""
+    : "";
   const scriptCommand =
+    customBuildCommand ||
     `pnpm run ${buildConfig.packageBuildScript}  # 若未使用 pnpm，则执行 npm run ${buildConfig.packageBuildScript} / yarn run ${buildConfig.packageBuildScript}`;
 
   const make = (
@@ -1636,7 +1642,7 @@ function plannedExecutionCommandsForStage({
     if (buildRuntime === "go") {
       return [
         make("go-mod", "下载 Go 依赖", contextDir, "go mod download"),
-        make("go-build", "执行 Go 构建", contextDir, "go build -o bin/application ."),
+        make("go-build", customBuildCommand ? "执行手输 Go 打包命令" : "执行 Go 构建", contextDir, customBuildCommand || "go build -o bin/application ."),
         make("archive", "归档真实构建产物", contextDir, `tar -czf ${quoteCommandArg(packagePath)} ${outputPaths}`),
       ];
     }
@@ -1644,10 +1650,10 @@ function plannedExecutionCommandsForStage({
       make("install", "安装依赖", contextDir, installCommand, nodeInstallDetails(contextDir)),
       make(
         "build",
-        `执行 package.json scripts.${buildConfig.packageBuildScript}`,
+        customBuildCommand ? "执行手输打包命令" : `执行 package.json scripts.${buildConfig.packageBuildScript}`,
         contextDir,
         scriptCommand,
-        nodeScriptDetails(buildConfig.packageBuildScript, "前端构建", buildConfig.packageOutputPaths),
+        customBuildCommand ? undefined : nodeScriptDetails(buildConfig.packageBuildScript, "前端构建", buildConfig.packageOutputPaths),
       ),
       make(
         "archive",
@@ -1675,6 +1681,16 @@ function plannedExecutionCommandsForStage({
   }
 
   if (stage.key === "upload") {
+    if (packageMode !== "container_image") {
+      const packageUpload = pipeline.packageUpload;
+      const targetPath = packageUpload?.targetPathTemplate || "${application.id}/${environment}/${run.id}/${artifact.name}";
+      const uploadCommand = packageUpload && shouldRunCustomPackageUploadCommand(packageUpload)
+        ? packageUpload.customUploadCommand?.trim() ?? ""
+        : `cp ${quoteCommandArg(packagePath)} ${quoteCommandArg(targetPath)}`;
+      return [
+        make("package-upload", packageUpload && shouldRunCustomPackageUploadCommand(packageUpload) ? "执行手输上传命令" : "上传包产物", contextDir, uploadCommand),
+      ];
+    }
     return [
       make("daemon", "检查 Docker daemon", runDir, "docker version --format {{.Server.Version}}"),
       make("login", "登录镜像仓库", runDir, `docker login --username <REGISTRY_USERNAME> ${quoteCommandArg(imageArtifact.registryUrl)}`),

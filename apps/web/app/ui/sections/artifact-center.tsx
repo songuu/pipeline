@@ -280,6 +280,12 @@ export function ArtifactCenter({ snapshot, onCopy, onDeploy, onCanaryDeploy, onR
                       <span>{artifact.signed ? "signed" : "unsigned"}</span>
                     </div>
                     <p className="artifact-mode-note">{packageModeExecutorHint(packageMode)}</p>
+                    {(artifact.publicUrl || artifact.uri) && (
+                      <div className="artifact-card-meta wide">
+                        <span>{artifact.storageProvider ?? "package-store"}</span>
+                        <span>{artifact.publicUrl || artifact.uri}</span>
+                      </div>
+                    )}
                     <div className="artifact-deploy-row">
                       {releaseTargets.map((environment) => {
                         const key = `${artifact.id}:${environment}`;

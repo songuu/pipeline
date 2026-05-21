@@ -1,5 +1,11 @@
 import { z } from "zod";
-import { IMAGE_REGISTRY_PROVIDERS, PACKAGE_MODES } from "@deploy-management/shared";
+import {
+  IMAGE_REGISTRY_PROVIDERS,
+  PACKAGE_BUILD_COMMAND_MODES,
+  PACKAGE_MODES,
+  PACKAGE_UPLOAD_COMMAND_MODES,
+  PACKAGE_UPLOAD_PROVIDERS,
+} from "@deploy-management/shared";
 
 const sourcePolicySchema = z.object({
   allowedBranchPatterns: z.array(z.string().min(1).max(120)).min(1).max(20),
@@ -51,8 +57,22 @@ const imageArtifactSchema = z.object({
 const buildConfigSchema = z.object({
   packageMode: z.enum(PACKAGE_MODES).optional(),
   runtime: z.enum(["node", "go", "generic"]).optional(),
+  contextPath: z.string().min(1).max(512).optional(),
+  packageBuildCommandMode: z.enum(PACKAGE_BUILD_COMMAND_MODES).optional(),
   packageBuildScript: z.string().min(1).max(120),
+  packageBuildCommand: z.string().max(1024).optional(),
   packageOutputPaths: z.array(z.string().min(1).max(256)).min(1).max(12),
+});
+
+const packageUploadSchema = z.object({
+  provider: z.enum(PACKAGE_UPLOAD_PROVIDERS),
+  customUploadCommandMode: z.enum(PACKAGE_UPLOAD_COMMAND_MODES).optional(),
+  endpoint: z.string().min(1).max(2048),
+  publicBaseUrl: z.string().max(2048).optional(),
+  accessDomain: z.string().max(2048).optional(),
+  targetPathTemplate: z.string().min(1).max(512),
+  serviceConnection: z.string().min(1).max(128),
+  customUploadCommand: z.string().max(2048).optional(),
 });
 
 export const createPipelineSchema = z.object({
@@ -85,6 +105,7 @@ export const createPipelineSchema = z.object({
   serviceConnections: z.array(z.string()).optional(),
   imageArtifact: imageArtifactSchema.optional(),
   buildConfig: buildConfigSchema.optional(),
+  packageUpload: packageUploadSchema.optional(),
 });
 
 export type CreatePipelineDto = z.infer<typeof createPipelineSchema>;

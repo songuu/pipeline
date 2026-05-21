@@ -1,17 +1,22 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createReadStream, existsSync } from "node:fs";
-import { mkdir, readFile, rm, stat } from "node:fs/promises";
+import { cp, mkdir, readFile, rm, stat } from "node:fs/promises";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { Injectable, Logger } from "@nestjs/common";
 import {
   DEFAULT_PIPELINE_BUILD_CONFIG,
+  PACKAGE_UPLOAD_PROVIDERS,
+  resolvePackageBuildCommandMode,
+  resolvePackageUploadCommandMode,
   toYunxiaoJobStatus,
   type JobStatus,
   type LifecycleStageKey,
   type RunEvent,
   type RunHandle,
   type RunStatus,
+  type PackageUploadProvider,
   type StageInstance,
   type StartRunInput,
 } from "@deploy-management/shared";
@@ -32,6 +37,7 @@ type LocalDockerRecord = {
 
 type CommandOptions = {
   cwd: string;
+  env?: NodeJS.ProcessEnv;
   input?: string;
   redact?: string[];
   timeoutMs?: number;
@@ -70,8 +76,19 @@ const EXECUTOR_PARAM_KEYS = new Set([
   "REGISTRY_SERVICE_CONNECTION",
   "REGISTRY_USERNAME",
   "REGISTRY_DOCKER_SECRET",
+  "PACKAGE_MODE",
+  "PACKAGE_BUILD_COMMAND_MODE",
   "PACKAGE_BUILD_SCRIPT",
+  "PACKAGE_BUILD_COMMAND",
   "PACKAGE_OUTPUT_PATHS",
+  "PACKAGE_UPLOAD_PROVIDER",
+  "PACKAGE_UPLOAD_COMMAND_MODE",
+  "PACKAGE_UPLOAD_ENDPOINT",
+  "PACKAGE_UPLOAD_PUBLIC_BASE_URL",
+  "PACKAGE_UPLOAD_ACCESS_DOMAIN",
+  "PACKAGE_UPLOAD_TARGET_PATH",
+  "PACKAGE_UPLOAD_SERVICE_CONNECTION",
+  "PACKAGE_UPLOAD_COMMAND",
   "DOCKER_BUILD_ARGS",
   "SUPABASE_DB_URL",
   "SUPABASE_SECRET_KEY",
@@ -176,7 +193,7 @@ export class LocalDockerExecutor implements ExecutorAdapter {
             : stage.name === "build"
               ? await this.packageBuild(record)
               : stage.name === "upload"
-                ? await this.dockerBuildAndPush(record)
+                ? await this.uploadArtifact(record)
                 : await this.runControlPlaneStage(record, stage.name as LifecycleStageKey);
 
       const skipped = result["skipped"] === "true";
@@ -246,16 +263,39 @@ export class LocalDockerExecutor implements ExecutorAdapter {
       return { skipped: "true", reason: "package.json has no test script" };
     }
     await this.installDependencies(contextDir, record, "test");
-    await this.runPackageManagerScript(contextDir, "test", record, "test");
+    await this.runPackageManagerScript(contextDir, "test", record, "test", envForStage(record.input, "test"));
     return { script: "test" };
   }
 
   private async packageBuild(record: LocalDockerRecord): Promise<Record<string, string>> {
     const contextDir = this.buildContextDir(record);
     const script = globalParamValue(record.input, "PACKAGE_BUILD_SCRIPT") || "build";
+    const configuredCommand = globalParamValue(record.input, "PACKAGE_BUILD_COMMAND").trim();
+    const configuredCommandMode = normalizeBuildCommandModeParam(globalParamValue(record.input, "PACKAGE_BUILD_COMMAND_MODE"));
+    const command = resolvePackageBuildCommandMode({
+      packageBuildCommandMode: configuredCommandMode,
+      packageBuildCommand: configuredCommand,
+    }) === "custom"
+      ? configuredCommand
+      : "";
     const configuredOutputPaths = splitList(globalParamValue(record.input, "PACKAGE_OUTPUT_PATHS"));
     const outputPaths = configuredOutputPaths.length > 0 ? configuredOutputPaths : DEFAULT_PIPELINE_BUILD_CONFIG.packageOutputPaths;
     const runtime = await this.detectBuildRuntime(record, contextDir);
+    const buildEnv = envForStage(record.input, "build");
+    if (runtime === "generic") {
+      if (!command) {
+        throw new Error("generic build runtime requires PACKAGE_BUILD_COMMAND");
+      }
+      await this.runCommandLine(command, {
+        cwd: contextDir,
+        record,
+        stageKey: "build",
+        label: "执行通用自定义打包命令",
+        env: buildEnv,
+        redact: redactValuesFromEnv(buildEnv),
+      });
+      return await this.archiveBuildOutputs(record, contextDir, outputPaths, runtime);
+    }
     if (runtime === "go") {
       if (!(await exists(path.join(contextDir, "go.mod")))) {
         throw new Error(`go.mod does not exist in build context: ${contextDir}`);
@@ -266,22 +306,46 @@ export class LocalDockerExecutor implements ExecutorAdapter {
         record,
         stageKey: "build",
         label: "下载 Go 依赖",
+        env: buildEnv,
       });
-      await this.runCommand("go", ["build", "-o", "bin/application", "."], {
-        cwd: contextDir,
-        record,
-        stageKey: "build",
-        label: "执行 Go 构建",
-      });
+      if (command) {
+        await this.runCommandLine(command, {
+          cwd: contextDir,
+          record,
+          stageKey: "build",
+          label: "执行自定义 Go 打包命令",
+          env: buildEnv,
+          redact: redactValuesFromEnv(buildEnv),
+        });
+      } else {
+        await this.runCommand("go", ["build", "-o", "bin/application", "."], {
+          cwd: contextDir,
+          record,
+          stageKey: "build",
+          label: "执行 Go 构建",
+          env: buildEnv,
+        });
+      }
       return await this.archiveBuildOutputs(record, contextDir, outputPaths, runtime);
     }
     const packageJson = await this.readPackageJson(contextDir);
-    if (!packageJson.scripts?.[script]) {
+    if (!command && !packageJson.scripts?.[script]) {
       throw new Error(`package.json scripts.${script} does not exist`);
     }
 
     await this.installDependencies(contextDir, record, "build");
-    await this.runPackageManagerScript(contextDir, script, record, "build");
+    if (command) {
+      await this.runCommandLine(command, {
+        cwd: contextDir,
+        record,
+        stageKey: "build",
+        label: "执行自定义打包命令",
+        env: buildEnv,
+        redact: redactValuesFromEnv(buildEnv),
+      });
+    } else {
+      await this.runPackageManagerScript(contextDir, script, record, "build", buildEnv);
+    }
 
     return await this.archiveBuildOutputs(record, contextDir, outputPaths, runtime);
   }
@@ -319,6 +383,14 @@ export class LocalDockerExecutor implements ExecutorAdapter {
     };
   }
 
+  private async uploadArtifact(record: LocalDockerRecord): Promise<Record<string, string>> {
+    const packageMode = globalParamValue(record.input, "PACKAGE_MODE") || "container_image";
+    if (packageMode === "container_image") {
+      return this.dockerBuildAndPush(record);
+    }
+    return this.uploadPackageArtifact(record, packageMode);
+  }
+
   private async dockerBuildAndPush(record: LocalDockerRecord): Promise<Record<string, string>> {
     const imageRef = globalParamValue(record.input, "IMAGE_REF");
     if (!imageRef) throw new Error("IMAGE_REF is required for local-docker upload");
@@ -350,6 +422,63 @@ export class LocalDockerExecutor implements ExecutorAdapter {
       throw new Error("docker push completed but no registry digest was returned or inspectable");
     }
     return { "image-digest": digest, "image-ref": imageRef, "docker-pull": `docker pull ${imageRef}`, imageRef };
+  }
+
+  private async uploadPackageArtifact(record: LocalDockerRecord, packageMode: string): Promise<Record<string, string>> {
+    const packagePath = stageResult(record, "build", "package-path");
+    const packageDigest = stageResult(record, "build", "package-digest");
+    if (!packagePath || !(await exists(packagePath))) {
+      throw new Error("package upload requires a build package artifact; run build before upload");
+    }
+    const provider = normalizePackageUploadProvider(globalParamValue(record.input, "PACKAGE_UPLOAD_PROVIDER"));
+    const endpoint = globalParamValue(record.input, "PACKAGE_UPLOAD_ENDPOINT") || process.env.PACKAGE_UPLOAD_ROOT || ".codex-tmp/package-uploads";
+    const targetPath = sanitizeRelativePath(globalParamValue(record.input, "PACKAGE_UPLOAD_TARGET_PATH") || `${record.input.applicationId}/${record.input.pipelineRunId}/${path.basename(packagePath)}`);
+    const mirrorRoot = packageUploadMirrorRoot(endpoint);
+    const destination = safeJoin(mirrorRoot, targetPath);
+    await mkdir(path.dirname(destination), { recursive: true });
+    await cp(packagePath, destination);
+
+    const packageUri = packageUriFrom(endpoint, targetPath, destination);
+    const publicUrl = packagePublicUrl(record.input, endpoint, targetPath, destination);
+    const configuredCommand = globalParamValue(record.input, "PACKAGE_UPLOAD_COMMAND").trim();
+    const configuredCommandMode = normalizeUploadCommandModeParam(globalParamValue(record.input, "PACKAGE_UPLOAD_COMMAND_MODE"));
+    const command = resolvePackageUploadCommandMode({
+      provider,
+      customUploadCommandMode: configuredCommandMode,
+      customUploadCommand: configuredCommand,
+    }) === "custom"
+      ? configuredCommand
+      : "";
+    const uploadEnv = {
+      ...envForStage(record.input, "upload"),
+      PACKAGE_MODE: packageMode,
+      PACKAGE_UPLOAD_PROVIDER: provider,
+      PACKAGE_UPLOAD_ENDPOINT: endpoint,
+      PACKAGE_UPLOAD_TARGET_PATH: targetPath,
+      PACKAGE_ARCHIVE_PATH: packagePath,
+      PACKAGE_MIRROR_PATH: destination,
+      PACKAGE_DIGEST: packageDigest,
+      PACKAGE_URI: packageUri,
+      PACKAGE_PUBLIC_URL: publicUrl,
+    };
+    if (command) {
+      await this.runCommandLine(command, {
+        cwd: record.sourceDir,
+        record,
+        stageKey: "upload",
+        label: "执行自定义包上传命令",
+        env: uploadEnv,
+        redact: redactValuesFromEnv(uploadEnv),
+      });
+    }
+    return {
+      "package-mode": packageMode,
+      "package-path": packagePath,
+      "package-digest": packageDigest,
+      "package-uri": packageUri,
+      "package-public-url": publicUrl,
+      "package-storage-provider": provider,
+    };
   }
 
   private async runControlPlaneStage(record: LocalDockerRecord, stageKey: LifecycleStageKey): Promise<Record<string, string>> {
@@ -463,13 +592,21 @@ export class LocalDockerExecutor implements ExecutorAdapter {
     });
   }
 
-  private async runPackageManagerScript(contextDir: string, script: string, record: LocalDockerRecord, stageKey: LifecycleStageKey): Promise<void> {
+  private async runPackageManagerScript(
+    contextDir: string,
+    script: string,
+    record: LocalDockerRecord,
+    stageKey: LifecycleStageKey,
+    env?: NodeJS.ProcessEnv,
+  ): Promise<void> {
     if (await exists(path.join(contextDir, "pnpm-lock.yaml"))) {
       await this.runCommand("pnpm", ["run", script], {
         cwd: contextDir,
         record,
         stageKey,
         label: `执行 package.json scripts.${script}`,
+        env,
+        redact: redactValuesFromEnv(env),
       });
       return;
     }
@@ -479,6 +616,8 @@ export class LocalDockerExecutor implements ExecutorAdapter {
         record,
         stageKey,
         label: `执行 package.json scripts.${script}`,
+        env,
+        redact: redactValuesFromEnv(env),
       });
       return;
     }
@@ -487,6 +626,8 @@ export class LocalDockerExecutor implements ExecutorAdapter {
       record,
       stageKey,
       label: `执行 package.json scripts.${script}`,
+      env,
+      redact: redactValuesFromEnv(env),
     });
   }
 
@@ -502,10 +643,11 @@ export class LocalDockerExecutor implements ExecutorAdapter {
     return safeJoin(record.sourceDir, globalParamValue(record.input, "BUILD_CONTEXT") || ".");
   }
 
-  private async detectBuildRuntime(record: LocalDockerRecord, contextDir: string): Promise<"node" | "go"> {
+  private async detectBuildRuntime(record: LocalDockerRecord, contextDir: string): Promise<"node" | "go" | "generic"> {
     const configured = globalParamValue(record.input, "BUILD_RUNTIME").trim().toLowerCase();
     if (configured === "go") return "go";
     if (configured === "node") return "node";
+    if (configured === "generic") return "generic";
     if (await exists(path.join(contextDir, "go.mod"))) return "go";
     return "node";
   }
@@ -553,6 +695,14 @@ export class LocalDockerExecutor implements ExecutorAdapter {
       }
     }
     throw lastStartupError ?? new Error(`failed to start command "${command} ${args.join(" ")}" in ${options.cwd}`);
+  }
+
+  private async runCommandLine(commandLine: string, options: CommandOptions): Promise<string> {
+    const spec = shellSpec(commandLine);
+    return this.runCommand(spec.executable, spec.args, {
+      ...options,
+      label: options.label,
+    });
   }
 
   private pushCommandEvent(
@@ -623,7 +773,7 @@ export class LocalDockerExecutor implements ExecutorAdapter {
 
 function spawnCommand(spec: CommandSpec, options: CommandOptions): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn(spec.executable, spec.args, { cwd: options.cwd, env: process.env, shell: false, windowsHide: true });
+    const child = spawn(spec.executable, spec.args, { cwd: options.cwd, env: { ...process.env, ...options.env }, shell: false, windowsHide: true });
     let output = "";
     let settled = false;
     const display = redact(spec.display, options.redact);
@@ -691,6 +841,22 @@ function resolveCommandSpecs(command: string, args: string[]): CommandSpec[] {
   }
 
   return [plainSpec(command, args)];
+}
+
+function shellSpec(commandLine: string): CommandSpec {
+  if (process.platform === "win32") {
+    const executable = process.env.ComSpec?.trim() || "cmd.exe";
+    return {
+      executable,
+      args: ["/d", "/s", "/c", commandLine],
+      display: `${quoteDisplay(executable)} /d /s /c ${commandLine}`,
+    };
+  }
+  return {
+    executable: "/bin/sh",
+    args: ["-lc", commandLine],
+    display: `/bin/sh -lc ${quoteDisplay(commandLine)}`,
+  };
 }
 
 function plainSpec(executable: string, args: string[], display = `${quoteDisplay(executable)} ${args.map(quoteDisplay).join(" ")}`.trim()): CommandSpec {
@@ -762,6 +928,113 @@ function createStage(stage: LifecycleStageKey, index: number): StageInstance {
 
 function globalParamValue(input: StartRunInput, key: string): string {
   return input.globalParams.find((param) => param.key === key)?.value ?? "";
+}
+
+function normalizeBuildCommandModeParam(value: string): "script" | "custom" | undefined {
+  return value === "script" || value === "custom" ? value : undefined;
+}
+
+function normalizeUploadCommandModeParam(value: string): "provider" | "custom" | undefined {
+  return value === "provider" || value === "custom" ? value : undefined;
+}
+
+function normalizePackageUploadProvider(value: string): PackageUploadProvider {
+  return PACKAGE_UPLOAD_PROVIDERS.includes(value as PackageUploadProvider)
+    ? (value as PackageUploadProvider)
+    : "local-filesystem";
+}
+
+function envForStage(input: StartRunInput, stageKey: LifecycleStageKey): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const param of input.globalParams) {
+    const key = param.key.trim();
+    if (!key || key.startsWith("runtime.") || EXECUTOR_PARAM_KEYS.has(key) || !isEnvironmentVariableName(key)) {
+      continue;
+    }
+    if (shouldInjectParamIntoStage(param, stageKey)) {
+      env[key] = param.value;
+    }
+  }
+  for (const param of input.globalParams) {
+    const key = param.key.trim();
+    if (!key.startsWith("runtime.")) continue;
+    const runtimeKey = key.slice("runtime.".length);
+    if (isEnvironmentVariableName(runtimeKey) && shouldInjectParamIntoStage(param, stageKey)) {
+      env[runtimeKey] = param.value;
+    }
+  }
+  return env;
+}
+
+function shouldInjectParamIntoStage(param: StartRunInput["globalParams"][number], stageKey: LifecycleStageKey): boolean {
+  if (param.targetStages?.includes(stageKey)) return true;
+  if (param.injectionTiming === "build") return stageKey === "test" || stageKey === "build" || stageKey === "package";
+  if (param.injectionTiming === "deploy") return stageKey === "deploy" || stageKey === "canary" || stageKey === "promote";
+  if (param.injectionTiming === "runtime") return stageKey === "deploy" || stageKey === "canary" || stageKey === "approval" || stageKey === "promote";
+  return stageKey === "build" || stageKey === "test";
+}
+
+function isEnvironmentVariableName(value: string): boolean {
+  return /^[A-Z_][A-Z0-9_]*$/.test(value);
+}
+
+function redactValuesFromEnv(env: NodeJS.ProcessEnv | undefined): string[] {
+  if (!env) return [];
+  return Object.entries(env)
+    .filter(([key, value]) => /SECRET|TOKEN|PASSWORD|KEY/i.test(key) && Boolean(value) && String(value).length > 3)
+    .map(([, value]) => String(value));
+}
+
+function stageResult(record: LocalDockerRecord, stageKey: LifecycleStageKey, key: string): string {
+  const stage = record.stages.find((item) => item.name === stageKey);
+  return stage?.jobs[0]?.result?.[key] ?? "";
+}
+
+function packageUploadMirrorRoot(endpoint: string): string {
+  const configuredRoot = process.env.PACKAGE_UPLOAD_ROOT;
+  if (configuredRoot?.trim()) return path.resolve(configuredRoot);
+  if (endpoint.startsWith("file://")) {
+    return path.resolve(endpoint.replace(/^file:\/+/i, ""));
+  }
+  if (isLocalPath(endpoint)) {
+    return path.resolve(endpoint);
+  }
+  return path.resolve(process.cwd(), ".codex-tmp", "package-uploads");
+}
+
+function packageUriFrom(endpoint: string, targetPath: string, destination: string): string {
+  const trimmed = endpoint.trim();
+  if (!trimmed || isLocalPath(trimmed) || trimmed.startsWith("file://")) {
+    return pathToFileURL(destination).toString();
+  }
+  return joinUrlLike(trimmed, targetPath);
+}
+
+function packagePublicUrl(input: StartRunInput, endpoint: string, targetPath: string, destination: string): string {
+  const publicBase = firstNonEmpty(
+    globalParamValue(input, "PACKAGE_UPLOAD_PUBLIC_BASE_URL"),
+    globalParamValue(input, "PACKAGE_UPLOAD_ACCESS_DOMAIN"),
+  );
+  if (publicBase) return joinUrlLike(publicBase, targetPath);
+  if (/^https?:\/\//i.test(endpoint)) return joinUrlLike(endpoint, targetPath);
+  return pathToFileURL(destination).toString();
+}
+
+function isLocalPath(value: string): boolean {
+  return /^[a-zA-Z]:[\\/]/.test(value) || value.startsWith(".") || value.startsWith("/") || value.startsWith("\\");
+}
+
+function sanitizeRelativePath(value: string): string {
+  const normalized = value.replace(/\\/g, "/").replace(/^\/+/, "");
+  const parts = normalized.split("/").filter((part) => part && part !== ".");
+  if (parts.some((part) => part === "..")) {
+    throw new Error(`package upload target path escapes upload root: ${value}`);
+  }
+  return parts.join("/") || "package.tar.gz";
+}
+
+function joinUrlLike(base: string, relativePath: string): string {
+  return `${base.replace(/\/+$/g, "")}/${relativePath.replace(/^\/+/g, "")}`;
 }
 
 function controlPlaneCommandForStage(

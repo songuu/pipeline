@@ -55,11 +55,65 @@ const STAGE_FALLBACK_ORDER: LifecycleStageKey[] = [
   "promote",
 ];
 
+function dedupeStages(stages: LifecycleStageKey[]): LifecycleStageKey[] {
+  return [...new Set(stages)];
+}
+
+function collectNearestEnabledDependencies(
+  stage: LifecycleStageKey,
+  enabledStages: ReadonlySet<LifecycleStageKey>,
+  visited = new Set<LifecycleStageKey>(),
+): LifecycleStageKey[] {
+  if (visited.has(stage)) return [];
+  visited.add(stage);
+
+  const resolvedDependencies: LifecycleStageKey[] = [];
+  for (const dependency of DEFAULT_STAGE_DAG[stage] ?? []) {
+    if (enabledStages.has(dependency)) {
+      resolvedDependencies.push(dependency);
+      continue;
+    }
+    resolvedDependencies.push(...collectNearestEnabledDependencies(dependency, enabledStages, visited));
+  }
+  return dedupeStages(resolvedDependencies);
+}
+
+function hasCompressedDependencyPath(
+  stage: LifecycleStageKey,
+  target: LifecycleStageKey,
+  enabledStages: ReadonlySet<LifecycleStageKey>,
+  visited = new Set<LifecycleStageKey>(),
+): boolean {
+  if (visited.has(stage)) return false;
+  visited.add(stage);
+
+  for (const dependency of collectNearestEnabledDependencies(stage, enabledStages)) {
+    if (dependency === target) return true;
+    if (hasCompressedDependencyPath(dependency, target, enabledStages, visited)) return true;
+  }
+  return false;
+}
+
+function pruneRedundantDependencies(
+  dependencies: LifecycleStageKey[],
+  enabledStages: ReadonlySet<LifecycleStageKey>,
+): LifecycleStageKey[] {
+  const uniqueDependencies = dedupeStages(dependencies);
+  return uniqueDependencies.filter(
+    (dependency) =>
+      !uniqueDependencies.some(
+        (otherDependency) =>
+          otherDependency !== dependency &&
+          hasCompressedDependencyPath(otherDependency, dependency, enabledStages),
+      ),
+  );
+}
+
 export function defaultStageRunAfter(
   stage: LifecycleStageKey,
   enabledStages: ReadonlySet<LifecycleStageKey>,
 ): LifecycleStageKey[] {
-  return (DEFAULT_STAGE_DAG[stage] ?? []).filter((dep) => enabledStages.has(dep));
+  return pruneRedundantDependencies(collectNearestEnabledDependencies(stage, enabledStages), enabledStages);
 }
 
 export function stageNodeId(stage: LifecycleStageKey): string {

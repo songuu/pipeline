@@ -4,13 +4,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { GitBranch, Play, X } from "lucide-react";
 import {
   DEFAULT_PIPELINE_BUILD_CONFIG,
-  ensureRegistryUploadStage,
+  ensureArtifactUploadStage,
   resolveImageArtifact,
   type EnvironmentType,
   type GitReferenceType,
   type PipelineDefinition,
   type PlatformSnapshot,
   type SourceRepository,
+  resolvePackageBuildCommandMode,
+  resolvePackageUploadCommandMode,
 } from "@deploy-management/shared";
 import { Field } from "../components/primitives";
 import { environmentOptions } from "../data/templates";
@@ -91,9 +93,14 @@ export function RunLaunchDialog({
       : matchesAnyPattern(config.refName, sourcePolicy.allowedTagPatterns);
   const commitAllowed = !config.commitSha || sourcePolicy.allowRuntimeCommit;
   const sourcePolicyAllowed = Boolean(repository.url.trim() && config.refName && runtimeSwitchAllowed && patternAllowed && commitAllowed);
-  const imageArtifact = resolveImageArtifact(pipeline);
   const buildConfig = pipeline.buildConfig ?? DEFAULT_PIPELINE_BUILD_CONFIG;
-  const selectedStages = ensureRegistryUploadStage(config.stages.length > 0 ? config.stages : pipeline.stages, imageArtifact);
+  const packageMode = buildConfig.packageMode ?? "container_image";
+  const imageArtifact = packageMode === "container_image" ? resolveImageArtifact(pipeline) : undefined;
+  const selectedStages = ensureArtifactUploadStage(config.stages.length > 0 ? config.stages : pipeline.stages, {
+    packageMode,
+    imageArtifact,
+    packageUpload: pipeline.packageUpload,
+  });
   const selectedStageKey = selectedStages.join("|");
   const realPreflightMessages = useMemo(() => {
     const stageSet = new Set(selectedStages);
@@ -114,14 +121,18 @@ export function RunLaunchDialog({
     if ((stageSet.has("build") || stageSet.has("upload")) && !stageSet.has("source") && !cluster.pipelineRefConfigured) {
       missing.push("inline Pipeline 的真实打包/上传必须包含 source 阶段，用于正式拉取代码");
     }
-    if ((stageSet.has("build") || stageSet.has("upload")) && !buildConfig.packageBuildScript.trim()) {
-      missing.push("缺少 package.json 打包脚本，请在 Node.js 构建任务中配置 buildConfig.packageBuildScript");
+    const buildCommandMode = resolvePackageBuildCommandMode(buildConfig);
+    if ((stageSet.has("build") || stageSet.has("upload")) && buildCommandMode === "custom" && !buildConfig.packageBuildCommand?.trim()) {
+      missing.push("已选择手输打包命令，但命令内容为空，请在构建任务中填写完整命令或切回 package.json 脚本");
+    }
+    if ((stageSet.has("build") || stageSet.has("upload")) && buildCommandMode === "script" && !buildConfig.packageBuildScript.trim()) {
+      missing.push("已选择 package.json 脚本打包，但脚本名为空，请在构建任务中填写脚本名或切换到手输命令");
     }
     if ((stageSet.has("build") || stageSet.has("upload")) && buildConfig.packageOutputPaths.length === 0) {
       missing.push("缺少打包产物目录，请配置 .next、dist、build 或 out 等真实输出目录");
     }
-    if (!imageArtifact.registryUrl.trim() || !imageArtifact.namespace.trim() || !imageArtifact.imageName.trim()) {
-      missing.push("缺少完整镜像仓库配置，需要 registry、namespace/project 和 imageName");
+    if (!buildConfig.contextPath?.trim()) {
+      missing.push("缺少构建上下文，请配置 buildConfig.contextPath");
     }
     if (
       cluster.executorMode === "tekton" &&
@@ -132,33 +143,60 @@ export function RunLaunchDialog({
       missing.push("缺少 TEKTON_SOURCE_PVC，inline Pipeline 需要 PVC 保存 checkout 源码、package 打包产物和 Docker build 上下文");
     }
     if (stageSet.has("upload")) {
-      if (!imageArtifact.dockerfilePath.trim()) {
-        missing.push("缺少 Dockerfile 路径，无法执行真实容器镜像构建");
-      }
-      if (!imageArtifact.contextPath.trim()) {
-        missing.push("缺少构建上下文路径，无法执行真实打包/镜像构建");
-      }
-      if (
-        cluster.executorMode === "tekton" &&
-        imageArtifact.privateRegistry &&
-        !imageArtifact.dockerConfigSecret?.trim() &&
-        !cluster.dockerSecretFallbackConfigured
-      ) {
-        missing.push("私有镜像仓库缺少 docker-registry Secret，请配置 imageArtifact.dockerConfigSecret 或 TEKTON_DOCKER_SECRET");
-      }
-      if (cluster.executorMode === "local-docker" && imageArtifact.privateRegistry && !cluster.localRegistryPasswordConfigured) {
-        missing.push("本机 Docker 推送私有镜像缺少 ACR_PASSWORD / ALIYUN_ACR_PASSWORD / REGISTRY_PASSWORD / DOCKER_PASSWORD");
+      if (packageMode === "container_image") {
+        if (!imageArtifact?.registryUrl.trim() || !imageArtifact.namespace.trim() || !imageArtifact.imageName.trim()) {
+          missing.push("缺少完整镜像仓库配置，需要 registry、namespace/project 和 imageName");
+        }
+        if (!imageArtifact?.dockerfilePath.trim()) {
+          missing.push("缺少 Dockerfile 路径，无法执行真实容器镜像构建");
+        }
+        if (!imageArtifact?.contextPath.trim()) {
+          missing.push("缺少 Docker build 上下文路径");
+        }
+        if (
+          cluster.executorMode === "tekton" &&
+          imageArtifact?.privateRegistry &&
+          !imageArtifact.dockerConfigSecret?.trim() &&
+          !cluster.dockerSecretFallbackConfigured
+        ) {
+          missing.push("私有镜像仓库缺少 docker-registry Secret，请配置 imageArtifact.dockerConfigSecret 或 TEKTON_DOCKER_SECRET");
+        }
+        if (cluster.executorMode === "local-docker" && imageArtifact?.privateRegistry && !cluster.localRegistryPasswordConfigured) {
+          missing.push("本机 Docker 推送私有镜像缺少 ACR_PASSWORD / ALIYUN_ACR_PASSWORD / REGISTRY_PASSWORD / DOCKER_PASSWORD");
+        }
+      } else {
+        if (!pipeline.packageUpload?.endpoint.trim()) {
+          missing.push("非镜像包上传缺少上传端点，请配置 packageUpload.endpoint");
+        }
+        if (!pipeline.packageUpload?.targetPathTemplate.trim()) {
+          missing.push("非镜像包上传缺少目标路径模板，请配置 packageUpload.targetPathTemplate");
+        }
+        if (!pipeline.packageUpload?.serviceConnection.trim()) {
+          missing.push("非镜像包上传缺少服务连接，请配置 packageUpload.serviceConnection");
+        }
+        if (pipeline.packageUpload && resolvePackageUploadCommandMode(pipeline.packageUpload) === "custom" && !pipeline.packageUpload.customUploadCommand?.trim()) {
+          missing.push("已选择手输上传命令，但命令内容为空，请填写 packageUpload.customUploadCommand 或切回内置上传流程");
+        }
       }
     }
     return missing;
   }, [
-    imageArtifact.contextPath,
-    imageArtifact.dockerConfigSecret,
-    imageArtifact.dockerfilePath,
-    imageArtifact.imageName,
-    imageArtifact.namespace,
-    imageArtifact.privateRegistry,
-    imageArtifact.registryUrl,
+    imageArtifact?.contextPath,
+    imageArtifact?.dockerConfigSecret,
+    imageArtifact?.dockerfilePath,
+    imageArtifact?.imageName,
+    imageArtifact?.namespace,
+    imageArtifact?.privateRegistry,
+    imageArtifact?.registryUrl,
+    packageMode,
+    buildConfig.packageBuildCommandMode,
+    buildConfig.packageBuildCommand,
+    pipeline.packageUpload?.endpoint,
+    pipeline.packageUpload?.serviceConnection,
+    pipeline.packageUpload?.targetPathTemplate,
+    pipeline.packageUpload?.customUploadCommandMode,
+    pipeline.packageUpload?.customUploadCommand,
+    buildConfig.contextPath,
     buildConfig.packageBuildScript,
     buildConfig.packageOutputPaths,
     pipeline.repository,

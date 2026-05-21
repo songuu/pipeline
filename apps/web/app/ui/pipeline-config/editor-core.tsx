@@ -4,9 +4,11 @@ import { useEffect, useMemo, useState } from "react";
 import { Archive, CheckCircle2, Copy, GitBranch, Plus, Rocket, XCircle } from "lucide-react";
 import {
   DEFAULT_PIPELINE_BUILD_CONFIG,
+  DEFAULT_PACKAGE_UPLOAD_CONFIG,
   PACKAGE_MODES,
+  PACKAGE_UPLOAD_PROVIDERS,
   defaultImageArtifactConfig,
-  ensureRegistryUploadStage,
+  ensureArtifactUploadStage,
   IMAGE_REGISTRY_PRESETS,
   type EnvironmentType,
   type GitReferenceType,
@@ -15,6 +17,10 @@ import {
   type ImageRegistryProvider,
   type LifecycleStageKey,
   type PackageMode,
+  type PackageBuildCommandMode,
+  type PackageUploadConfig,
+  type PackageUploadCommandMode,
+  type PackageUploadProvider,
   type PipelineBuildConfig,
   type PipelineBuildRuntime,
   type PipelineDefinition,
@@ -26,6 +32,8 @@ import {
   type UpdatePipelineRequest,
   type VariableInjectionTiming,
   resolveStageRunAfter,
+  resolvePackageBuildCommandMode,
+  resolvePackageUploadCommandMode,
   validatePipelineGraph,
   type DagViolation,
 } from "@deploy-management/shared";
@@ -53,11 +61,15 @@ import {
   normalizeVariable,
   packageModeHelp,
   packageModeLabel,
+  packageUploadFromPipeline,
   parseOutputPathText,
   providerFrom,
   repositoryIdentityFrom,
   repositoryNameFrom,
+  stageLabelForPackageMode,
   splitVariablesByTiming,
+  taskDefinitionForPackageMode,
+  taskDefinitionsForPackageMode,
   type RunConfig,
   uniqueRefs,
   upsertImageTagVariable,
@@ -69,8 +81,73 @@ const REGISTRY_SERVICE_CONNECTION_OPTIONS = REGISTRY_PROVIDER_OPTIONS.map((prese
   value: preset.defaults.serviceConnection,
   label: preset.label,
 }));
+const PACKAGE_UPLOAD_PROVIDER_LABELS: Record<PackageUploadProvider, string> = {
+  "local-filesystem": "本地发布目录",
+  oss: "OSS / 对象存储",
+  "static-server": "自建静态服务器",
+  custom: "自定义上传",
+};
+const RUNTIME_VARIABLE_TARGET_STAGES: LifecycleStageKey[] = ["deploy", "canary", "approval", "promote"];
 
 export type { RunConfig } from "./model";
+
+function runtimeRowsFromPipeline(pipeline: PipelineDefinition): string[][] {
+  const rows = pipeline.runtimeVariables?.length
+    ? pipeline.runtimeVariables
+    : [
+        {
+          key: "RELEASE_NOTE",
+          value: "manual run",
+          description: "运行时发布说明",
+        },
+      ];
+  return rows.map((variable) => [
+    variable.key,
+    variable.value,
+    variable.description ?? (variable.key === "RELEASE_NOTE" ? "运行时发布说明" : "运行时变量"),
+    variable.key === "RELEASE_NOTE" ? "manual run / release tag" : "",
+  ]);
+}
+
+function runtimeVariableValueFromRows(rows: string[][]): string {
+  return rows.find((row) => row[0] === "RELEASE_NOTE")?.[1] ?? rows[0]?.[1] ?? "manual run";
+}
+
+function runtimeRowsToParams(rows: string[][], releaseNoteValue: string): GlobalParam[] {
+  return rows
+    .map((row) => ({
+      key: row[0]?.trim() ?? "",
+      value: row[0] === "RELEASE_NOTE" ? releaseNoteValue : row[1] ?? "",
+      description: row[2]?.trim() || undefined,
+      injectionTiming: "runtime" as const,
+      targetStages: RUNTIME_VARIABLE_TARGET_STAGES,
+    }))
+    .filter((variable) => variable.key);
+}
+
+function variableGroupRowsFromVariables(variables: GlobalParam[]): string[][] {
+  return variables.map((variable) => {
+    const timing = variable.injectionTiming ?? defaultInjectionTimingForKey(variable.key);
+    const timingLabel = VARIABLE_TIMING_OPTIONS.find((option) => option.key === timing)?.label ?? VARIABLE_TIMING_LABELS[timing];
+    return [
+      variable.key,
+      variable.value,
+      variable.description ?? "",
+      variable.encrypted ? "是" : "否",
+      timingLabel,
+      "已启用",
+    ];
+  });
+}
+
+function timingFromTableValue(value: string): VariableInjectionTiming {
+  const normalized = value.trim();
+  return VARIABLE_TIMING_OPTIONS.find((option) => option.key === normalized || option.label === normalized)?.key ?? "runtime";
+}
+
+function encryptedFromTableValue(value: string): boolean {
+  return ["1", "true", "yes", "y", "是", "私密", "加密"].includes(value.trim().toLowerCase());
+}
 
 interface PipelineConfigEditorProps {
   snapshot: PlatformSnapshot;
@@ -118,7 +195,7 @@ export function PipelineConfigEditor({
   const [stringVariables, setStringVariables] = useState<GlobalParam[]>(() =>
     normalizePipelineVariables(pipeline.variables, pipeline.targetEnvironment, pipeline.applicationId),
   );
-  const [runtimeVariable, setRuntimeVariable] = useState(pipeline.runtimeVariables?.[0]?.value ?? "manual run");
+  const [runtimeVariable, setRuntimeVariable] = useState(() => runtimeVariableValueFromRows(runtimeRowsFromPipeline(pipeline)));
   const [repositoryUrl, setRepositoryUrl] = useState(pipeline.repository);
   const [repositoryProvider, setRepositoryProvider] = useState<SourceRepositoryProvider>(() => providerFrom(pipeline.repository));
   const [repositoryAccessToken, setRepositoryAccessToken] = useState("");
@@ -132,8 +209,22 @@ export function PipelineConfigEditor({
   const [containerImage, setContainerImage] = useState("build-steps/alinux3");
   const [buildRuntime, setBuildRuntime] = useState<PipelineBuildRuntime>(() => buildConfigFromPipeline(pipeline).runtime ?? "node");
   const [packageMode, setPackageMode] = useState<PackageMode>(() => buildConfigFromPipeline(pipeline).packageMode ?? "container_image");
+  const [packageBuildCommandMode, setPackageBuildCommandMode] = useState<PackageBuildCommandMode>(() =>
+    resolvePackageBuildCommandMode(buildConfigFromPipeline(pipeline)),
+  );
   const [packageBuildScript, setPackageBuildScript] = useState(() => buildConfigFromPipeline(pipeline).packageBuildScript);
+  const [packageBuildCommand, setPackageBuildCommand] = useState(() => buildConfigFromPipeline(pipeline).packageBuildCommand ?? "");
   const [packageOutputPaths, setPackageOutputPaths] = useState(() => buildConfigFromPipeline(pipeline).packageOutputPaths.join("\n"));
+  const [packageUploadProvider, setPackageUploadProvider] = useState<PackageUploadProvider>(() => packageUploadFromPipeline(pipeline).provider);
+  const [packageUploadEndpoint, setPackageUploadEndpoint] = useState(() => packageUploadFromPipeline(pipeline).endpoint);
+  const [packageUploadPublicBaseUrl, setPackageUploadPublicBaseUrl] = useState(() => packageUploadFromPipeline(pipeline).publicBaseUrl ?? "");
+  const [packageUploadAccessDomain, setPackageUploadAccessDomain] = useState(() => packageUploadFromPipeline(pipeline).accessDomain ?? "");
+  const [packageUploadTargetPath, setPackageUploadTargetPath] = useState(() => packageUploadFromPipeline(pipeline).targetPathTemplate);
+  const [packageUploadServiceConnection, setPackageUploadServiceConnection] = useState(() => packageUploadFromPipeline(pipeline).serviceConnection);
+  const [packageUploadCommandMode, setPackageUploadCommandMode] = useState<PackageUploadCommandMode>(() =>
+    resolvePackageUploadCommandMode(packageUploadFromPipeline(pipeline)),
+  );
+  const [packageUploadCommand, setPackageUploadCommand] = useState(() => packageUploadFromPipeline(pipeline).customUploadCommand ?? "");
   const [privateRegistry, setPrivateRegistry] = useState(true);
   const [serviceConnection, setServiceConnection] = useState(pipeline.serviceConnections?.[1] ?? "aliyun-acr-deploy");
   const [registryProvider, setRegistryProvider] = useState<ImageRegistryProvider>(
@@ -157,12 +248,7 @@ export function PipelineConfigEditor({
   const [tagValue, setTagValue] = useState("nodejs");
   const [groupValue, setGroupValue] = useState("backend");
   const [taskSteps, setTaskSteps] = useState<string[]>([]);
-  const [variableGroupRows, setVariableGroupRows] = useState<string[][]>([
-    ["NODE_COMMON", "true", "Node.js 通用变量", "否", "自动注入", "已启用"],
-  ]);
-  const [runtimeRows, setRuntimeRows] = useState<string[][]>([
-    ["RELEASE_NOTE", runtimeVariable, "运行时发布说明", "manual run / release tag", "编辑"],
-  ]);
+  const [runtimeRows, setRuntimeRows] = useState<string[][]>(() => runtimeRowsFromPipeline(pipeline));
   const [allowedBranchPatterns, setAllowedBranchPatterns] = useState(
     (pipeline.sourcePolicy?.allowedBranchPatterns ?? [pipeline.defaultBranch]).join("\n"),
   );
@@ -211,7 +297,16 @@ export function PipelineConfigEditor({
     allowRuntimeCommit,
     repository.defaultBranch,
   );
+  const variableGroupRows = useMemo(() => variableGroupRowsFromVariables(stringVariables), [stringVariables]);
   const title = pipeline.name.startsWith("流水线") ? pipeline.name : "流水线 2026-05-08";
+  const effectivePackageUploadCommandMode: PackageUploadCommandMode =
+    packageUploadProvider === "custom" ? "custom" : packageUploadCommandMode;
+  const taskDefinitions = useMemo(() => taskDefinitionsForPackageMode(packageMode), [packageMode]);
+  const buildCommandMissing = packageBuildCommandMode === "custom"
+    ? !packageBuildCommand.trim()
+    : !packageBuildScript.trim();
+  const packageUploadCommandMissing =
+    effectivePackageUploadCommandMode === "custom" && !packageUploadCommand.trim();
   const incompleteCount = [
     !pipelineName.trim(),
     !runConfig.repositoryId,
@@ -220,19 +315,32 @@ export function PipelineConfigEditor({
     runConfig.refType === "tag" && sourcePolicy.allowedTagPatterns.length === 0,
     enabledStages.length < 2,
     !buildCluster,
-    enabledStages.includes("upload") && !serviceConnection,
-    enabledStages.includes("upload") && !registryUrl.trim(),
-    enabledStages.includes("upload") && !registryNamespace.trim(),
-    enabledStages.includes("upload") && !imageName.trim(),
-    enabledStages.includes("upload") && !imageTagTemplate.trim(),
-    enabledStages.includes("upload") && privateRegistry && !dockerConfigSecret.trim(),
-    enabledStages.includes("build") && !packageBuildScript.trim(),
+    enabledStages.includes("upload") && packageMode === "container_image" && !serviceConnection,
+    enabledStages.includes("upload") && packageMode === "container_image" && !registryUrl.trim(),
+    enabledStages.includes("upload") && packageMode === "container_image" && !registryNamespace.trim(),
+    enabledStages.includes("upload") && packageMode === "container_image" && !imageName.trim(),
+    enabledStages.includes("upload") && packageMode === "container_image" && !imageTagTemplate.trim(),
+    enabledStages.includes("upload") && packageMode === "container_image" && privateRegistry && !dockerConfigSecret.trim(),
+    enabledStages.includes("upload") && packageMode !== "container_image" && !packageUploadEndpoint.trim(),
+    enabledStages.includes("upload") && packageMode !== "container_image" && !packageUploadTargetPath.trim(),
+    enabledStages.includes("upload") && packageMode !== "container_image" && !packageUploadServiceConnection.trim(),
+    enabledStages.includes("build") && buildCommandMissing,
     enabledStages.includes("build") && parseOutputPathText(packageOutputPaths).length === 0,
+    enabledStages.includes("upload") && packageMode !== "container_image" && packageUploadCommandMissing,
     !cachePath.trim(),
     triggers.trim().length === 0,
   ].filter(Boolean).length;
   const tektonBinding = snapshot.tekton.bindings.find((item) => item.pipelineId === pipeline.id);
-  const selectedTaskDefinition = TASK_DEFINITIONS.find((item) => item.name === selectedTask) ?? TASK_DEFINITIONS[1];
+  const selectedTaskFallbackStage = TASK_DEFINITIONS.find((item) => item.name === selectedTask)?.stage;
+  const selectedTaskDefinition =
+    taskDefinitions.find((item) => item.name === selectedTask) ??
+    (selectedTaskFallbackStage ? taskDefinitions.find((item) => item.stage === selectedTaskFallbackStage) : undefined) ??
+    taskDefinitions[1] ??
+    TASK_DEFINITIONS[1];
+  const taskStageMap = useMemo<Record<string, LifecycleStageKey>>(
+    () => Object.fromEntries(taskDefinitions.map((task) => [task.name, task.stage])),
+    [taskDefinitions],
+  );
   const selectedTaskGraph = tektonBinding?.taskGraph.find((task) => task.name === selectedTaskDefinition.stage);
   const selectedWorkspaceNames = selectedTaskGraph?.workspaces ?? selectedTaskDefinition.workspaces;
   const selectedWorkspaces = (tektonBinding?.workspaceBindings ?? []).filter((workspace) =>
@@ -256,6 +364,16 @@ export function PipelineConfigEditor({
       targetStages: param.targetStages,
     })),
   };
+
+  useEffect(() => {
+    if (taskDefinitions.some((task) => task.name === selectedTask)) return;
+    const fallbackStage = selectedTaskFallbackStage ?? selectedTaskDefinition.stage;
+    const nextTask = taskDefinitions.find((task) => task.stage === fallbackStage) ?? taskDefinitions[1];
+    if (nextTask) {
+      setSelectedTask(nextTask.name);
+    }
+  }, [selectedTask, selectedTaskDefinition.stage, selectedTaskFallbackStage, taskDefinitions]);
+
   const tabs: Array<{ key: PipelineConfigTab; label: string }> = [
     { key: "basic", label: "基本信息" },
     { key: "source", label: "流水线源" },
@@ -380,8 +498,9 @@ export function PipelineConfigEditor({
     setEnabledStages(pipeline.stages);
     setTriggers(pipeline.triggers.join("\n"));
     setStringVariables(normalizePipelineVariables(pipeline.variables, pipeline.targetEnvironment, pipeline.applicationId));
-    setRuntimeVariable(pipeline.runtimeVariables?.[0]?.value ?? "manual run");
-    setRuntimeRows([["RELEASE_NOTE", pipeline.runtimeVariables?.[0]?.value ?? "manual run", "运行时发布说明", "manual run / release tag", "编辑"]]);
+    const nextRuntimeRows = runtimeRowsFromPipeline(pipeline);
+    setRuntimeRows(nextRuntimeRows);
+    setRuntimeVariable(runtimeVariableValueFromRows(nextRuntimeRows));
     setRepositoryUrl(pipeline.repository);
     setRepositoryProvider(providerFrom(pipeline.repository));
     setRemoteBranches([]);
@@ -391,8 +510,19 @@ export function PipelineConfigEditor({
     const nextBuildConfig = buildConfigFromPipeline(pipeline);
     setBuildRuntime(nextBuildConfig.runtime ?? "node");
     setPackageMode(nextBuildConfig.packageMode ?? "container_image");
+    setPackageBuildCommandMode(resolvePackageBuildCommandMode(nextBuildConfig));
     setPackageBuildScript(nextBuildConfig.packageBuildScript);
+    setPackageBuildCommand(nextBuildConfig.packageBuildCommand ?? "");
     setPackageOutputPaths(nextBuildConfig.packageOutputPaths.join("\n"));
+    const nextPackageUpload = packageUploadFromPipeline(pipeline);
+    setPackageUploadProvider(nextPackageUpload.provider);
+    setPackageUploadEndpoint(nextPackageUpload.endpoint);
+    setPackageUploadPublicBaseUrl(nextPackageUpload.publicBaseUrl ?? "");
+    setPackageUploadAccessDomain(nextPackageUpload.accessDomain ?? "");
+    setPackageUploadTargetPath(nextPackageUpload.targetPathTemplate);
+    setPackageUploadServiceConnection(nextPackageUpload.serviceConnection);
+    setPackageUploadCommandMode(resolvePackageUploadCommandMode(nextPackageUpload));
+    setPackageUploadCommand(nextPackageUpload.customUploadCommand ?? "");
     const nextImageArtifact = imageArtifactFromPipeline(pipeline);
     setServiceConnection(nextImageArtifact.serviceConnection || pipeline.serviceConnections?.[1] || "aliyun-acr-deploy");
     setRegistryProvider(nextImageArtifact.registryProvider ?? "aliyun-acr");
@@ -407,7 +537,7 @@ export function PipelineConfigEditor({
     setDockerConfigSecret(nextImageArtifact.dockerConfigSecret ?? "");
     setPrivateRegistry(nextImageArtifact.privateRegistry);
     setDockerfilePath(nextImageArtifact.dockerfilePath);
-    setBuildContextPath(nextImageArtifact.contextPath);
+    setBuildContextPath(nextBuildConfig.contextPath ?? nextImageArtifact.contextPath);
     setAllowedBranchPatterns((pipeline.sourcePolicy?.allowedBranchPatterns ?? [pipeline.defaultBranch]).join("\n"));
     setAllowedTagPatterns((pipeline.sourcePolicy?.allowedTagPatterns ?? ["v*"]).join("\n"));
     setAllowRuntimeBranch(pipeline.sourcePolicy?.allowRuntimeBranch ?? true);
@@ -495,6 +625,57 @@ export function PipelineConfigEditor({
     });
   };
 
+  const updateVariableGroupCell = (rowIndex: number, columnIndex: number, value: string) => {
+    if (columnIndex === 4) {
+      changeVariableTiming(rowIndex, timingFromTableValue(value));
+      return;
+    }
+    const patch: Partial<GlobalParam> =
+      columnIndex === 0
+        ? { key: value }
+        : columnIndex === 1
+          ? { value }
+          : columnIndex === 2
+            ? { description: value }
+            : columnIndex === 3
+              ? { encrypted: encryptedFromTableValue(value) }
+              : {};
+    if (Object.keys(patch).length > 0) {
+      updateStringVariable(rowIndex, patch);
+    }
+  };
+
+  const deleteVariableGroupRow = (rowIndex: number) => {
+    setStringVariables(stringVariables.filter((_, index) => index !== rowIndex));
+  };
+
+  const applyRuntimeRows = (rows: string[][]) => {
+    setRuntimeRows(rows);
+    setRuntimeVariable(runtimeVariableValueFromRows(rows));
+  };
+
+  const updateRuntimeRowCell = (rowIndex: number, columnIndex: number, value: string) => {
+    applyRuntimeRows(
+      runtimeRows.map((row, index) =>
+        index === rowIndex
+          ? [...row.slice(0, columnIndex), value, ...row.slice(columnIndex + 1)]
+          : row,
+      ),
+    );
+  };
+
+  const syncReleaseNoteValue = (value: string) => {
+    const hasReleaseNote = runtimeRows.some((row) => row[0] === "RELEASE_NOTE");
+    const rows = hasReleaseNote
+      ? runtimeRows.map((row) => (row[0] === "RELEASE_NOTE" ? [row[0], value, row[2] ?? "运行时发布说明", row[3] ?? "manual run / release tag"] : row))
+      : [["RELEASE_NOTE", value, "运行时发布说明", "manual run / release tag"], ...runtimeRows];
+    applyRuntimeRows(rows);
+  };
+
+  const deleteRuntimeRow = (rowIndex: number) => {
+    applyRuntimeRows(runtimeRows.filter((_, index) => index !== rowIndex));
+  };
+
   const updateImageTagTemplate = (value: string) => {
     setImageTagTemplate(value);
     setStringVariables(upsertImageTagVariable(stringVariables, value));
@@ -540,8 +721,22 @@ export function PipelineConfigEditor({
   const buildPipelineBuildConfig = (): PipelineBuildConfig => ({
     packageMode,
     runtime: buildRuntime,
+    contextPath: buildContextPath.trim() || DEFAULT_PIPELINE_BUILD_CONFIG.contextPath,
+    packageBuildCommandMode,
     packageBuildScript: packageBuildScript.trim() || DEFAULT_PIPELINE_BUILD_CONFIG.packageBuildScript,
+    ...(packageBuildCommand.trim() ? { packageBuildCommand: packageBuildCommand.trim() } : {}),
     packageOutputPaths: normalizeOutputPathText(packageOutputPaths),
+  });
+
+  const buildPackageUploadConfig = (): PackageUploadConfig => ({
+    provider: packageUploadProvider,
+    customUploadCommandMode: effectivePackageUploadCommandMode,
+    endpoint: packageUploadEndpoint.trim() || DEFAULT_PACKAGE_UPLOAD_CONFIG.endpoint,
+    publicBaseUrl: packageUploadPublicBaseUrl.trim(),
+    accessDomain: packageUploadAccessDomain.trim() || packageUploadPublicBaseUrl.trim(),
+    targetPathTemplate: packageUploadTargetPath.trim() || DEFAULT_PACKAGE_UPLOAD_CONFIG.targetPathTemplate,
+    serviceConnection: packageUploadServiceConnection.trim() || DEFAULT_PACKAGE_UPLOAD_CONFIG.serviceConnection,
+    ...(packageUploadCommand.trim() ? { customUploadCommand: packageUploadCommand.trim() } : {}),
   });
 
   const imageArtifactPreview = resolveImageArtifact(
@@ -580,7 +775,8 @@ export function PipelineConfigEditor({
 
   const buildPipelinePatch = (): UpdatePipelineRequest => {
     const imageArtifact = packageMode === "container_image" ? buildImageArtifactConfig() : undefined;
-    const stages = imageArtifact ? ensureRegistryUploadStage(enabledStages, imageArtifact) : enabledStages;
+    const packageUpload = packageMode === "container_image" ? undefined : buildPackageUploadConfig();
+    const stages = ensureArtifactUploadStage(enabledStages, { packageMode, imageArtifact, packageUpload });
     return {
       name: pipelineName,
       repositoryId: repository.id,
@@ -602,15 +798,7 @@ export function PipelineConfigEditor({
       variables: imageArtifact
         ? upsertImageTagVariable(stringVariables, imageArtifact.tagTemplate)
         : stringVariables.filter((item) => item.key !== "IMAGE_TAG"),
-      runtimeVariables: [
-        {
-          key: "RELEASE_NOTE",
-          value: runtimeVariable,
-          description: "运行时发布说明",
-          injectionTiming: "runtime",
-          targetStages: ["deploy", "canary", "approval", "promote"],
-        },
-      ],
+      runtimeVariables: runtimeRowsToParams(runtimeRows, runtimeVariable),
       caches: [
         {
           key: `${repository.name}-cache`,
@@ -619,24 +807,13 @@ export function PipelineConfigEditor({
           enabled: cachePath.trim().length > 0,
         },
       ],
-      serviceConnections: imageArtifact ? [`${repositoryProvider}-readonly`, serviceConnection, "ack-deploy"] : [`${repositoryProvider}-readonly`, "ack-deploy"],
+      serviceConnections: imageArtifact
+        ? [`${repositoryProvider}-readonly`, serviceConnection, "ack-deploy"]
+        : [`${repositoryProvider}-readonly`, packageUpload?.serviceConnection ?? DEFAULT_PACKAGE_UPLOAD_CONFIG.serviceConnection, "ack-deploy"],
       buildConfig: buildPipelineBuildConfig(),
       imageArtifact,
+      packageUpload,
     };
-  };
-
-  const taskStageMap: Record<string, LifecycleStageKey> = {
-    "JavaScript 代码扫描": "test",
-    "Node.js 单元测试": "test",
-    "Node.js 构建": "build",
-    "镜像构建并推送": "upload",
-    "注入环境变量": "env",
-    "生成 SBOM 与证明": "package",
-    "Kubernetes 发布": "deploy",
-    "灰度观测": "canary",
-    "人工审批门禁": "approval",
-    "全量发布": "promote",
-    "拉取代码": "source",
   };
 
   const selectTask = (taskName: string, stage: LifecycleStageKey) => {
@@ -646,8 +823,8 @@ export function PipelineConfigEditor({
   };
 
   const selectStageNode = (stage: LifecycleStageKey) => {
-    const stageTasks = TASK_DEFINITIONS.filter((task) => task.stage === stage);
-    const currentSelectedTask = TASK_DEFINITIONS.find((task) => task.name === selectedTask);
+    const stageTasks = taskDefinitions.filter((task) => task.stage === stage);
+    const currentSelectedTask = taskDefinitions.find((task) => task.name === selectedTask);
     if (currentSelectedTask?.stage === stage) return;
     const target = stageTasks[0];
     if (!target) return;
@@ -742,9 +919,11 @@ export function PipelineConfigEditor({
   };
 
   const addNewTask = () => {
-    const nextTask = enabledStages.includes("approval") ? "全量发布" : "人工审批门禁";
-    const nextStage = nextTask === "全量发布" ? "promote" : "approval";
-    selectTask(nextTask, nextStage);
+    const nextStageKey: LifecycleStageKey = enabledStages.includes("approval") ? "promote" : "approval";
+    const nextTask = taskDefinitions.find((task) => task.stage === nextStageKey);
+    if (nextTask) {
+      selectTask(nextTask.name, nextStageKey);
+    }
   };
 
   const addStep = () => {
@@ -780,11 +959,13 @@ export function PipelineConfigEditor({
   };
 
   const saveAndRun = async () => {
-    const stages = ensureRegistryUploadStage(enabledStages, buildImageArtifactConfig());
+    const imageArtifact = packageMode === "container_image" ? buildImageArtifactConfig() : undefined;
+    const packageUpload = packageMode === "container_image" ? undefined : buildPackageUploadConfig();
+    const stages = ensureArtifactUploadStage(enabledStages, { packageMode, imageArtifact, packageUpload });
     if (!enabledStages.includes("upload") && stages.includes("upload")) {
       setEnabledStages(stages);
       setRunConfig({ ...runConfig, stages });
-      onNotify("已根据镜像仓库配置自动加入上传阶段");
+      onNotify(packageMode === "container_image" ? "已根据镜像仓库配置自动加入上传阶段" : "已根据包上传配置自动加入上传阶段");
     }
     const updated = await saveDraft();
     onSaveRun(updated, {
@@ -796,9 +977,15 @@ export function PipelineConfigEditor({
 
   const taskMissingConfig = (stage: LifecycleStageKey) =>
     ((stage === "test" || stage === "build" || stage === "upload") && !buildCluster) ||
-    (stage === "build" && (!packageBuildScript.trim() || parseOutputPathText(packageOutputPaths).length === 0)) ||
-    ((stage === "upload" || stage === "deploy" || stage === "canary" || stage === "promote") && !serviceConnection) ||
-    (stage === "upload" && (!registryUrl.trim() || !registryNamespace.trim() || !imageName.trim() || (privateRegistry && !dockerConfigSecret.trim()))) ||
+    (stage === "build" && (buildCommandMissing || parseOutputPathText(packageOutputPaths).length === 0)) ||
+    (stage === "upload" && packageMode === "container_image" && !serviceConnection) ||
+    ((stage === "deploy" || stage === "canary" || stage === "promote") && !serviceConnection) ||
+    (stage === "upload" &&
+      packageMode === "container_image" &&
+      (!registryUrl.trim() || !registryNamespace.trim() || !imageName.trim() || (privateRegistry && !dockerConfigSecret.trim()))) ||
+    (stage === "upload" &&
+      packageMode !== "container_image" &&
+      (!packageUploadEndpoint.trim() || !packageUploadTargetPath.trim() || !packageUploadServiceConnection.trim() || packageUploadCommandMissing)) ||
     (stage === "env" && stringVariables.length === 0);
   const invalidStagesSet = useMemo(
     () => new Set<LifecycleStageKey>(enabledStages.filter((stage) => taskMissingConfig(stage))),
@@ -825,6 +1012,16 @@ export function PipelineConfigEditor({
     ]
       .filter(Boolean)
       .join(" ");
+  const taskForStage = (stage: LifecycleStageKey) =>
+    taskDefinitionForPackageMode(packageMode, stage) ?? TASK_DEFINITIONS.find((task) => task.stage === stage);
+  const sourceTask = taskForStage("source");
+  const buildTask = taskForStage("build");
+  const uploadTask = taskForStage("upload");
+  const envTask = taskForStage("env");
+  const packageTask = taskForStage("package");
+  const deployTask = taskForStage("deploy");
+  const canaryTask = taskForStage("canary");
+  const testTasks = taskDefinitions.filter((task) => task.stage === "test");
 
   return (
     <section className="pipeline-config-page">
@@ -1149,7 +1346,7 @@ export function PipelineConfigEditor({
               {flowViewMode === "canvas" ? (
                 <div className="flow-config-canvas-shell">
                   <PipelineConfigFlowCanvas
-                    pipeline={{ ...pipeline, stages: enabledStages }}
+                    pipeline={{ ...pipeline, stages: enabledStages, buildConfig: buildPipelineBuildConfig() }}
                     selectedStage={selectedTaskDefinition.stage}
                     invalidStages={invalidStagesSet}
                     customEdges={customEdges}
@@ -1165,8 +1362,8 @@ export function PipelineConfigEditor({
                 <div className="source-config-card">
                   <button
                     type="button"
-                    className={`source-pill ${selectedTask === "拉取代码" ? "selected" : ""}`}
-                    onClick={() => selectTask("拉取代码", "source")}
+                    className={`source-pill ${selectedTask === sourceTask?.name ? "selected" : ""}`}
+                    onClick={() => sourceTask && selectTask(sourceTask.name, "source")}
                   >
                     <span className="codeup-mark mini">C</span>
                     <strong>{repository.provider}/{repository.name}</strong>
@@ -1194,64 +1391,73 @@ export function PipelineConfigEditor({
                 </button>
               </section>
               <section className="flow-stage-lane">
-                <h2>测试</h2>
-                <button
-                  className={taskClass("test", "JavaScript 代码扫描", taskMissingConfig("test"))}
-                  onClick={() => selectTask("JavaScript 代码扫描", "test")}
-                >
-                  JavaScript 代码扫描 <XCircle size={15} />
-                </button>
-                <button
-                  className={taskClass("test", "Node.js 单元测试", taskMissingConfig("test"))}
-                  onClick={() => selectTask("Node.js 单元测试", "test")}
-                >
-                  Node.js 单元测试 <XCircle size={15} />
-                </button>
+                <h2>{stageLabelForPackageMode(packageMode, "test")}</h2>
+                {testTasks.map((task) => (
+                  <button
+                    key={task.name}
+                    className={taskClass("test", task.name, taskMissingConfig("test"))}
+                    onClick={() => selectTask(task.name, "test")}
+                  >
+                    {task.name} <XCircle size={15} />
+                  </button>
+                ))}
               </section>
               <section className="flow-stage-lane">
-                <h2>构建</h2>
-                <button
-                  className={taskClass("build", "Node.js 构建", taskMissingConfig("build"))}
-                  onClick={() => selectTask("Node.js 构建", "build")}
-                >
-                  Node.js 构建 <XCircle size={15} />
-                </button>
-                <button
-                  className={taskClass("upload", "镜像构建并推送", taskMissingConfig("upload"))}
-                  onClick={() => selectTask("镜像构建并推送", "upload")}
-                >
-                  镜像构建并推送
-                </button>
+                <h2>{stageLabelForPackageMode(packageMode, "build")}</h2>
+                {buildTask && (
+                  <button
+                    className={taskClass("build", buildTask.name, taskMissingConfig("build"))}
+                    onClick={() => selectTask(buildTask.name, "build")}
+                  >
+                    {buildTask.name} <XCircle size={15} />
+                  </button>
+                )}
+                {uploadTask && (
+                  <button
+                    className={taskClass("upload", uploadTask.name, taskMissingConfig("upload"))}
+                    onClick={() => selectTask(uploadTask.name, "upload")}
+                  >
+                    {uploadTask.name}
+                  </button>
+                )}
               </section>
               <section className="flow-stage-lane">
-                <h2>变量</h2>
-                <button
-                  className={taskClass("env", "注入环境变量", taskMissingConfig("env"))}
-                  onClick={() => selectTask("注入环境变量", "env")}
-                >
-                  注入环境变量
-                </button>
-                <button
-                  className={taskClass("package", "生成 SBOM 与证明")}
-                  onClick={() => selectTask("生成 SBOM 与证明", "package")}
-                >
-                  生成 SBOM 与证明
-                </button>
+                <h2>变量/制品</h2>
+                {envTask && (
+                  <button
+                    className={taskClass("env", envTask.name, taskMissingConfig("env"))}
+                    onClick={() => selectTask(envTask.name, "env")}
+                  >
+                    {envTask.name}
+                  </button>
+                )}
+                {packageTask && (
+                  <button
+                    className={taskClass("package", packageTask.name)}
+                    onClick={() => selectTask(packageTask.name, "package")}
+                  >
+                    {packageTask.name}
+                  </button>
+                )}
               </section>
               <section className="flow-stage-lane">
-                <h2>部署</h2>
-                <button
-                  className={taskClass("deploy", "Kubernetes 发布", taskMissingConfig("deploy"))}
-                  onClick={() => selectTask("Kubernetes 发布", "deploy")}
-                >
-                  Kubernetes 发布
-                </button>
-                <button
-                  className={taskClass("canary", "灰度观测", taskMissingConfig("canary"))}
-                  onClick={() => selectTask("灰度观测", "canary")}
-                >
-                  灰度观测 {pipeline.canaryPercent}%
-                </button>
+                <h2>{stageLabelForPackageMode(packageMode, "deploy")}</h2>
+                {deployTask && (
+                  <button
+                    className={taskClass("deploy", deployTask.name, taskMissingConfig("deploy"))}
+                    onClick={() => selectTask(deployTask.name, "deploy")}
+                  >
+                    {deployTask.name}
+                  </button>
+                )}
+                {canaryTask && (
+                  <button
+                    className={taskClass("canary", canaryTask.name, taskMissingConfig("canary"))}
+                    onClick={() => selectTask(canaryTask.name, "canary")}
+                  >
+                    {canaryTask.name} {pipeline.canaryPercent}%
+                  </button>
+                )}
               </section>
               <section className="flow-stage-lane muted">
                 <h2>新阶段</h2>
@@ -1266,7 +1472,7 @@ export function PipelineConfigEditor({
           </div>
           <aside className={`task-config-panel task-panel-${selectedTaskDefinition.kind}`}>
             <div className="task-config-head">
-              <span className="task-stage-badge">{STAGE_LABELS[selectedTaskDefinition.stage]}</span>
+              <span className="task-stage-badge">{stageLabelForPackageMode(packageMode, selectedTaskDefinition.stage)}</span>
               <strong>{selectedTaskDefinition.title}</strong>
               <button
                 className="plain-icon"
@@ -1378,22 +1584,53 @@ export function PipelineConfigEditor({
                         </select>
                       </Field>
                       <Field label="构建语言">
-                        <select value={buildRuntime} onChange={(event) => setBuildRuntime(event.target.value as PipelineBuildRuntime)}>
+                        <select
+                          value={buildRuntime}
+                          onChange={(event) => {
+                            const nextRuntime = event.target.value as PipelineBuildRuntime;
+                            setBuildRuntime(nextRuntime);
+                            if (nextRuntime === "generic") {
+                              setPackageBuildCommandMode("custom");
+                            }
+                          }}
+                        >
                           <option value="node">Node.js / package.json</option>
                           <option value="go">Go / go.mod</option>
+                          <option value="generic">通用命令</option>
                         </select>
                       </Field>
                       <p className="field-help">{packageModeHelp(packageMode)}</p>
+                      <Field label="构建上下文">
+                        <input value={buildContextPath} onChange={(event) => setBuildContextPath(event.target.value)} placeholder="." />
+                      </Field>
+                      <Field label="打包命令来源">
+                        <select value={packageBuildCommandMode} onChange={(event) => setPackageBuildCommandMode(event.target.value as PackageBuildCommandMode)}>
+                          <option value="script">使用原 package.json 脚本</option>
+                          <option value="custom">手输完整命令</option>
+                        </select>
+                      </Field>
                       <Field label="package.json 打包脚本">
                         <input
-                          className={packageBuildScript.trim() ? "" : "invalid-input"}
+                          className={packageBuildCommandMode !== "script" || packageBuildScript.trim() ? "" : "invalid-input"}
                           value={packageBuildScript}
                           onChange={(event) => setPackageBuildScript(event.target.value)}
                           placeholder="build"
+                          disabled={packageBuildCommandMode !== "script"}
                         />
                       </Field>
-                      <p className="field-help">填写 package.json scripts 中的脚本名，例如 build、build:test 或 build:prod。</p>
-                      {!packageBuildScript.trim() && <p className="field-error">package.json 打包脚本不能为空</p>}
+                      <p className="field-help">选择“使用原 package.json 脚本”时只执行 scripts.{packageBuildScript || "build"}，不会因为下方保留了手输命令而覆盖。</p>
+                      <Field label="手输打包命令">
+                        <textarea
+                          className={packageBuildCommandMode !== "custom" || packageBuildCommand.trim() ? "config-textarea" : "config-textarea invalid-input"}
+                          value={packageBuildCommand}
+                          onChange={(event) => setPackageBuildCommand(event.target.value)}
+                          placeholder="pnpm --filter @company/web build"
+                          rows={3}
+                          disabled={packageBuildCommandMode !== "custom"}
+                        />
+                      </Field>
+                      {packageBuildCommandMode === "custom" && !packageBuildCommand.trim() && <p className="field-error">已选择手输命令，请填写完整打包命令</p>}
+                      {packageBuildCommandMode === "script" && !packageBuildScript.trim() && <p className="field-error">已选择原脚本，请填写 package.json scripts 中的脚本名</p>}
                       <Field label="打包产物目录">
                         <textarea
                           className={parseOutputPathText(packageOutputPaths).length > 0 ? "" : "invalid-input"}
@@ -1481,6 +1718,8 @@ export function PipelineConfigEditor({
               {selectedTaskDefinition.kind === "upload" && (
                 <section className="task-specific-panel">
                   <h3>上传制品</h3>
+                  {packageMode === "container_image" ? (
+                    <>
                   <Field label="镜像托管类型">
                     <select
                       value={registryProvider}
@@ -1629,6 +1868,99 @@ export function PipelineConfigEditor({
                   <Field label="完整推送地址">
                     <input value={imageArtifactPreview.imageRef} readOnly />
                   </Field>
+                    </>
+                  ) : (
+                    <>
+                      <Field label="包上传类型">
+                        <select
+                          value={packageUploadProvider}
+                          onChange={(event) => {
+                            const nextProvider = event.target.value as PackageUploadProvider;
+                            setPackageUploadProvider(nextProvider);
+                            if (nextProvider === "custom") {
+                              setPackageUploadCommandMode("custom");
+                            }
+                          }}
+                        >
+                          {PACKAGE_UPLOAD_PROVIDERS.map((provider) => (
+                            <option key={provider} value={provider}>
+                              {PACKAGE_UPLOAD_PROVIDER_LABELS[provider]}
+                            </option>
+                          ))}
+                        </select>
+                      </Field>
+                      <p className="field-help">非镜像包会先生成 tar.gz，再上传到本地目录、OSS 镜像地址或自建静态服务器。</p>
+                      <Field label="上传端点">
+                        <input
+                          className={packageUploadEndpoint.trim() ? "" : "invalid-input"}
+                          value={packageUploadEndpoint}
+                          onChange={(event) => setPackageUploadEndpoint(event.target.value)}
+                          placeholder="oss://bucket/releases 或 C:\\deploy\\static"
+                        />
+                      </Field>
+                      {!packageUploadEndpoint.trim() && <p className="field-error">上传端点不能为空</p>}
+                      <Field label="访问域名">
+                        <input
+                          value={packageUploadPublicBaseUrl}
+                          onChange={(event) => setPackageUploadPublicBaseUrl(event.target.value)}
+                          placeholder="https://static.example.com/releases"
+                        />
+                      </Field>
+                      <Field label="备用访问域名">
+                        <input
+                          value={packageUploadAccessDomain}
+                          onChange={(event) => setPackageUploadAccessDomain(event.target.value)}
+                          placeholder="https://cdn.example.com/releases"
+                        />
+                      </Field>
+                      <Field label="目标路径模板">
+                        <input
+                          className={packageUploadTargetPath.trim() ? "" : "invalid-input"}
+                          value={packageUploadTargetPath}
+                          onChange={(event) => setPackageUploadTargetPath(event.target.value)}
+                          placeholder="${application.id}/${environment}/${run.id}/${artifact.name}"
+                        />
+                      </Field>
+                      {!packageUploadTargetPath.trim() && <p className="field-error">目标路径模板不能为空</p>}
+                      <Field label="上传服务连接">
+                        <input
+                          className={packageUploadServiceConnection.trim() ? "" : "invalid-input"}
+                          value={packageUploadServiceConnection}
+                          onChange={(event) => setPackageUploadServiceConnection(event.target.value)}
+                          placeholder="oss-prod-uploader / static-server-ssh"
+                        />
+                      </Field>
+                      {!packageUploadServiceConnection.trim() && <p className="field-error">上传服务连接不能为空</p>}
+                      <Field label="上传执行方式">
+                        <select
+                          value={effectivePackageUploadCommandMode}
+                          onChange={(event) => setPackageUploadCommandMode(event.target.value as PackageUploadCommandMode)}
+                          disabled={packageUploadProvider === "custom"}
+                        >
+                          <option value="provider">使用内置上传流程</option>
+                          <option value="custom">手输上传命令</option>
+                        </select>
+                      </Field>
+                      <Field label="手输上传命令">
+                        <textarea
+                          className={effectivePackageUploadCommandMode !== "custom" || packageUploadCommand.trim() ? "config-textarea" : "config-textarea invalid-input"}
+                          value={packageUploadCommand}
+                          onChange={(event) => setPackageUploadCommand(event.target.value)}
+                          placeholder="ossutil cp $PACKAGE_ARCHIVE_PATH $PACKAGE_URI 或 scp $PACKAGE_ARCHIVE_PATH user@host:/var/www/releases"
+                          rows={4}
+                          disabled={effectivePackageUploadCommandMode !== "custom"}
+                        />
+                      </Field>
+                      {effectivePackageUploadCommandMode === "custom" && !packageUploadCommand.trim() && <p className="field-error">已选择手输上传命令，请填写完整命令</p>}
+                      <p className="field-help">选择“使用内置上传流程”时会保留但不执行手输命令；手输命令可读取 PACKAGE_ARCHIVE_PATH、PACKAGE_URI、PACKAGE_PUBLIC_URL、PACKAGE_DIGEST。</p>
+                      <Field label="访问地址预览">
+                        <input
+                          value={`${(packageUploadPublicBaseUrl || packageUploadAccessDomain || packageUploadEndpoint).replace(/\/+$/g, "")}/${packageUploadTargetPath || DEFAULT_PACKAGE_UPLOAD_CONFIG.targetPathTemplate}`}
+                          readOnly
+                        />
+                      </Field>
+                    </>
+                  )}
                 </section>
               )}
 
@@ -1987,19 +2319,29 @@ export function PipelineConfigEditor({
                       </div>
                     </section>
                     <Field label="运行时变量 RELEASE_NOTE">
-                      <input value={runtimeVariable} onChange={(event) => setRuntimeVariable(event.target.value)} />
+                      <input value={runtimeVariable} onChange={(event) => syncReleaseNoteValue(event.target.value)} />
                     </Field>
                   </>
                 ) : (
                   <>
                     <VariableTable
                       title="通用变量组"
-                      columns={["变量名称", "默认值", "描述", "私密模式", "运行时设置", "操作"]}
+                      columns={["变量名称", "默认值", "描述", "私密模式", "运行时设置", "状态", "操作"]}
                       rows={variableGroupRows}
+                      readOnlyColumnIndexes={[5]}
+                      selectOptionsByColumn={{ 3: ["否", "是"], 4: VARIABLE_TIMING_OPTIONS.map((option) => option.label) }}
+                      onCellChange={updateVariableGroupCell}
+                      onDeleteRow={deleteVariableGroupRow}
                       onCreate={() => {
-                        setVariableGroupRows([
-                          ...variableGroupRows,
-                          [`GROUP_${variableGroupRows.length + 1}`, "enabled", "共享变量组", "否", "自动注入", "已启用"],
+                        setStringVariables([
+                          ...stringVariables,
+                          normalizeVariable({
+                            key: `GROUP_${stringVariables.length + 1}`,
+                            value: "enabled",
+                            description: "共享变量组",
+                            injectionTiming: "build",
+                            targetStages: ["test", "build", "package"],
+                          }, runConfig.environment),
                         ]);
                         onNotify("通用变量组已新增");
                       }}
@@ -2007,11 +2349,13 @@ export function PipelineConfigEditor({
                     <VariableTable
                       title="运行选择变量"
                       columns={["变量名称", "默认值", "描述", "选项", "操作"]}
-                      rows={runtimeRows.map((row) => (row[0] === "RELEASE_NOTE" ? [row[0], runtimeVariable, ...row.slice(2)] : row))}
+                      rows={runtimeRows}
+                      onCellChange={updateRuntimeRowCell}
+                      onDeleteRow={deleteRuntimeRow}
                       onCreate={() => {
-                        setRuntimeRows([
+                        applyRuntimeRows([
                           ...runtimeRows,
-                          [`CHOICE_${runtimeRows.length + 1}`, "blue", "运行时选择", "blue / green", "编辑"],
+                          [`CHOICE_${runtimeRows.length + 1}`, "blue", "运行时选择", "blue / green"],
                         ]);
                         onNotify("运行选择变量已新增");
                       }}
@@ -2026,6 +2370,3 @@ export function PipelineConfigEditor({
     </section>
   );
 }
-
-
-

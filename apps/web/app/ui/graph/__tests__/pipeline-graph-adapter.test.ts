@@ -65,10 +65,10 @@ describe("pipeline-graph-adapter", () => {
         stageNodeId("deploy"),
       ]);
       const edgePairs = graph.edges.map((e) => `${e.source}->${e.target}`);
-      // build 默认依赖 source（即使 test 不存在）；deploy 没有 upload 所以无入边
+      // build 默认依赖 source（即使 test 不存在）；deploy 会跨过未启用的 env/package/upload 接到最近的有效上游。
       expect(edgePairs).toContain(`${stageNodeId("source")}->${stageNodeId("build")}`);
-      // deploy 上游 upload 不存在，应当无入边到 deploy
-      expect(edgePairs).not.toContain(`->${stageNodeId("deploy")}`);
+      expect(edgePairs).toContain(`${stageNodeId("build")}->${stageNodeId("deploy")}`);
+      expect(edgePairs).not.toContain(`${stageNodeId("source")}->${stageNodeId("deploy")}`);
     });
   });
 
@@ -121,7 +121,7 @@ describe("pipeline-graph-adapter", () => {
   });
 
   describe("missing runAfter fallback", () => {
-    it("PipelineDefinition.stages 中缺失的上游会被裁剪", () => {
+    it("PipelineDefinition.stages 中缺失的上游会压缩到最近的有效依赖", () => {
       const enabled = new Set<LifecycleStageKey>(["source", "build"]);
       // env 默认依赖 test + build，但 test 不在 enabled 中
       expect(defaultStageRunAfter("env", enabled).sort()).toEqual(["build"]);
@@ -129,6 +129,20 @@ describe("pipeline-graph-adapter", () => {
       const graph = pipelineDefinitionToGraph(pipeline);
       const incomingToEnv = graph.edges.filter((e) => e.target === stageNodeId("env"));
       expect(incomingToEnv.map((e) => e.source)).toEqual([stageNodeId("build")]);
+    });
+
+    it("upload 没有 package 阶段时继续依赖 env，避免上传节点漂到起点列", () => {
+      const enabled = new Set<LifecycleStageKey>(["source", "test", "build", "env", "upload"]);
+      expect(defaultStageRunAfter("upload", enabled)).toEqual(["env"]);
+
+      const pipeline = makePipeline(["source", "test", "build", "env", "upload"]);
+      const graph = pipelineDefinitionToGraph(pipeline);
+      const env = graph.nodes.find((n) => n.id === stageNodeId("env"));
+      const upload = graph.nodes.find((n) => n.id === stageNodeId("upload"));
+      const edgePairs = graph.edges.map((e) => `${e.source}->${e.target}`);
+
+      expect(edgePairs).toContain(`${stageNodeId("env")}->${stageNodeId("upload")}`);
+      expect(upload!.position.x).toBeGreaterThan(env!.position.x);
     });
   });
 

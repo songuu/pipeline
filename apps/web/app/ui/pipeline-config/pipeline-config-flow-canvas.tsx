@@ -9,7 +9,7 @@ import type {
   PipelineGraphEdge,
   PipelineGraphNodeData,
 } from "../graph/pipeline-graph-types";
-import { STAGE_LABELS } from "./model";
+import { stageLabelForPackageMode } from "./model";
 
 export interface PipelineConfigFlowCanvasProps {
   pipeline: PipelineDefinition;
@@ -32,6 +32,7 @@ export function PipelineConfigFlowCanvas({
 }: PipelineConfigFlowCanvasProps) {
   const graph = useMemo(() => {
     const base = pipelineDefinitionToGraph(pipeline);
+    const packageMode = pipeline.buildConfig?.packageMode ?? "container_image";
     const customEdgeEntries: PipelineGraphEdge[] =
       customEdges?.map((edge) => ({
         id: `e:custom:${edge.from}->${edge.to}`,
@@ -49,7 +50,7 @@ export function PipelineConfigFlowCanvas({
         const stage = node.data.stage;
         const enriched: PipelineGraphNodeData = {
           ...node.data,
-          title: STAGE_LABELS[stage] ?? node.data.title,
+          title: stageLabelForPackageMode(packageMode, stage),
           status: invalidStages?.has(stage) ? "failed" : "pending",
           errorSummary: invalidStages?.has(stage) ? "缺少必需配置" : undefined,
         };

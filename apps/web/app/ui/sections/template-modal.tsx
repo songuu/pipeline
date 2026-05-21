@@ -1,7 +1,7 @@
 "use client";
 
 import { CheckCircle2, X } from "lucide-react";
-import { LIFECYCLE_STAGES, type PlatformSnapshot } from "@deploy-management/shared";
+import type { PlatformSnapshot } from "@deploy-management/shared";
 import { Field, MiniFlow } from "../components/primitives";
 import {
   categoryIcon,
@@ -9,6 +9,7 @@ import {
   templateCategories,
   type TemplateMode,
 } from "../data/templates";
+import { packageModeLabel, stageLabelForPackageMode } from "../pipeline-config/model";
 
 interface TemplateModalProps {
   snapshot: PlatformSnapshot;
@@ -169,7 +170,7 @@ export function TemplateModal({
               </Field>
               <Field label="构建配置">
                 <span>
-                  {selectedTemplate.buildConfig.packageMode} · {selectedTemplate.buildConfig.packageBuildScript}
+                  {packageModeLabel(selectedTemplate.buildConfig.packageMode ?? selectedTemplate.packageMode)} · {selectedTemplate.buildConfig.packageBuildScript}
                 </span>
               </Field>
               <Field label="制品路径">
@@ -181,7 +182,7 @@ export function TemplateModal({
               <Field label="完整生命周期">
                 <span>
                   {selectedTemplate.stages
-                    .map((stage) => LIFECYCLE_STAGES.find((item) => item.key === stage)?.title)
+                    .map((stage) => stageLabelForPackageMode(selectedTemplate.packageMode, stage))
                     .join(" → ")}
                 </span>
               </Field>

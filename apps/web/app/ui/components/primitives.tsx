@@ -1,7 +1,7 @@
 "use client";
 
 import type { KeyboardEvent, ReactNode } from "react";
-import { Activity, Archive, Ban, Check, PauseCircle, Plus, Search, X, XCircle } from "lucide-react";
+import { Activity, Archive, Ban, Check, PauseCircle, Plus, Search, Trash2, X, XCircle } from "lucide-react";
 import type { PipelineRun } from "@deploy-management/shared";
 
 export function Field({ label, children }: { label: string; children: ReactNode }) {
@@ -145,12 +145,22 @@ export function VariableTable({
   columns,
   rows = [],
   onCreate,
+  onCellChange,
+  onDeleteRow,
+  readOnlyColumnIndexes = [],
+  selectOptionsByColumn = {},
 }: {
   title: string;
   columns: string[];
   rows?: string[][];
   onCreate?: () => void;
+  onCellChange?: (rowIndex: number, columnIndex: number, value: string) => void;
+  onDeleteRow?: (rowIndex: number) => void;
+  readOnlyColumnIndexes?: number[];
+  selectOptionsByColumn?: Record<number, string[]>;
 }) {
+  const actionColumnIndex = columns.findIndex((column) => column === "操作");
+  const gridTemplateColumns = variableTableGridTemplate(columns);
   return (
     <section className="variable-table-block">
       <div className="variable-table-title">
@@ -166,7 +176,7 @@ export function VariableTable({
       <div className="variable-table">
         <div
           className="variable-table-head"
-          style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(120px, 1fr))` }}
+          style={{ gridTemplateColumns }}
         >
           {columns.map((column) => (
             <span key={column}>{column}</span>
@@ -177,11 +187,66 @@ export function VariableTable({
             <div
               className="variable-table-row"
               key={`${title}-${rowIndex}`}
-              style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(120px, 1fr))` }}
+              style={{ gridTemplateColumns }}
             >
-              {columns.map((column, columnIndex) => (
-                <span key={`${column}-${columnIndex}`}>{row[columnIndex] ?? "-"}</span>
-              ))}
+              {columns.map((column, columnIndex) => {
+                const isActionColumn = columnIndex === actionColumnIndex;
+                const isReadOnly = readOnlyColumnIndexes.includes(columnIndex) || !onCellChange;
+                const selectOptions = selectOptionsByColumn[columnIndex];
+                if (isActionColumn) {
+                  return (
+                    <span className="variable-table-actions" key={`${column}-${columnIndex}`}>
+                      {onDeleteRow ? (
+                        <button
+                          type="button"
+                          className="variable-row-action"
+                          onClick={() => onDeleteRow(rowIndex)}
+                          aria-label={`删除${row[0] ?? "变量"}`}
+                          title="删除"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      ) : (
+                        row[columnIndex] ?? "-"
+                      )}
+                    </span>
+                  );
+                }
+                if (column === "状态") {
+                  return (
+                    <span className="variable-status-pill" key={`${column}-${columnIndex}`}>
+                      {row[columnIndex] ?? "已启用"}
+                    </span>
+                  );
+                }
+                if (isReadOnly) {
+                  return <span key={`${column}-${columnIndex}`}>{row[columnIndex] ?? "-"}</span>;
+                }
+                if (selectOptions?.length) {
+                  return (
+                    <select
+                      key={`${column}-${columnIndex}`}
+                      value={row[columnIndex] ?? selectOptions[0]}
+                      onChange={(event) => onCellChange(rowIndex, columnIndex, event.target.value)}
+                      aria-label={`${title}-${column}-${rowIndex + 1}`}
+                    >
+                      {selectOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  );
+                }
+                return (
+                  <input
+                    key={`${column}-${columnIndex}`}
+                    value={row[columnIndex] ?? ""}
+                    onChange={(event) => onCellChange(rowIndex, columnIndex, event.target.value)}
+                    aria-label={`${title}-${column}-${rowIndex + 1}`}
+                  />
+                );
+              })}
             </div>
           ))
         ) : (
@@ -193,6 +258,22 @@ export function VariableTable({
       </div>
     </section>
   );
+}
+
+function variableTableGridTemplate(columns: string[]): string {
+  return columns
+    .map((column) => {
+      if (column === "操作") return "72px";
+      if (column === "状态") return "92px";
+      if (column === "私密模式") return "104px";
+      if (column === "运行时设置") return "126px";
+      if (column === "选项") return "minmax(180px, 1.2fr)";
+      if (column === "描述") return "minmax(180px, 1.3fr)";
+      if (column === "变量名称") return "minmax(150px, 1fr)";
+      if (column === "默认值") return "minmax(140px, 0.9fr)";
+      return "minmax(120px, 1fr)";
+    })
+    .join(" ");
 }
 
 export function CloseButton({ onClose, label }: { onClose: () => void; label: string }) {

@@ -36,10 +36,12 @@ type PipelineSource struct {
 
 // GlobalParam is a single key/value pair attached to a run.
 type GlobalParam struct {
-	Key         string `json:"key"`
-	Value       string `json:"value"`
-	Encrypted   bool   `json:"encrypted,omitempty"`
-	Description string `json:"description,omitempty"`
+	Key             string   `json:"key"`
+	Value           string   `json:"value"`
+	Encrypted       bool     `json:"encrypted,omitempty"`
+	Description     string   `json:"description,omitempty"`
+	InjectionTiming string   `json:"injectionTiming,omitempty"`
+	TargetStages    []string `json:"targetStages,omitempty"`
 }
 
 // StepInstance represents one container/command-level execution.
