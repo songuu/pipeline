@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Activity,
   CheckCircle2,
@@ -393,17 +394,41 @@ function PipelineRow({
           <MoreHorizontal size={16} />
         </button>
         {menuOpen && menuPosition && (
-          <div
-            className="action-menu row-action-menu floating"
-            style={{ top: menuPosition.top, left: menuPosition.left }}
-          >
-            <button onClick={onEdit}>编辑配置</button>
-            <button onClick={onCopy}>复制流水线 ID</button>
-            <button onClick={onRun}>立即运行</button>
-          </div>
+          <FloatingRowActionMenu
+            position={menuPosition}
+            onEdit={onEdit}
+            onCopy={onCopy}
+            onRun={onRun}
+          />
         )}
       </span>
     </div>
+  );
+}
+
+function FloatingRowActionMenu({
+  position,
+  onEdit,
+  onCopy,
+  onRun,
+}: {
+  position: { top: number; left: number };
+  onEdit: () => void;
+  onCopy: () => void;
+  onRun: () => void;
+}) {
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
+    <div
+      className="action-menu row-action-menu floating"
+      style={{ top: position.top, left: position.left }}
+    >
+      <button onClick={onEdit}>编辑配置</button>
+      <button onClick={onCopy}>复制流水线 ID</button>
+      <button onClick={onRun}>立即运行</button>
+    </div>,
+    document.body,
   );
 }
 

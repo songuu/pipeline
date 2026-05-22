@@ -50,6 +50,11 @@ import { PipelineRunDetail } from "./sections/pipeline-run-detail";
 import { PipelineConfigEditor, type RunConfig } from "./sections/pipeline-config-editor";
 import { RunLaunchDialog } from "./sections/run-launch-dialog";
 import { pipelineTemplates, type PipelineConfigTab, type PipelineTemplate, type TemplateMode } from "./data/templates";
+import {
+  applyFrontendTemplateInput,
+  emptyFrontendTemplateInput,
+  type FrontendTemplateInput,
+} from "./data/template-inputs";
 
 type Surface = "landing" | "list" | "detail" | "config";
 
@@ -70,6 +75,8 @@ export function DashboardShell({ surface, pipelineId, runId }: DashboardShellPro
   const [selectedTemplateKey, setSelectedTemplateKey] = useState("node-k8s-release");
   const [activeCategory, setActiveCategory] = useState("Node.js");
   const [templateMode, setTemplateMode] = useState<TemplateMode>("visual");
+  const [frontendTemplateInput, setFrontendTemplateInput] =
+    useState<FrontendTemplateInput>(emptyFrontendTemplateInput);
   const [configTab, setConfigTab] = useState<PipelineConfigTab>("basic");
   const [runLaunchPipeline, setRunLaunchPipeline] = useState<PipelineDefinition | null>(null);
   const [runLaunchConfig, setRunLaunchConfig] = useState<RunConfig | null>(null);
@@ -131,10 +138,15 @@ export function DashboardShell({ surface, pipelineId, runId }: DashboardShellPro
     notify(copied ? `${label}已复制` : `${label}复制失败，请手动复制`);
   };
 
+  const openTemplateModal = () => {
+    setFrontendTemplateInput({ ...emptyFrontendTemplateInput });
+    setShowTemplateModal(true);
+  };
+
   const createFromTemplate = async (templateKey = selectedTemplateKey) => {
     if (!snapshot) return;
     const template = pipelineTemplates.find((item) => item.key === templateKey) ?? pipelineTemplates[0];
-    const request = createRequestFromTemplate(template, snapshot, templateMode);
+    const request = createRequestFromTemplate(template, snapshot, templateMode, frontendTemplateInput);
     const pipeline = await createPipeline(request);
     setRunConfig({
       repositoryId: pipeline.repositoryId,
@@ -146,6 +158,7 @@ export function DashboardShell({ surface, pipelineId, runId }: DashboardShellPro
     });
     setShowTemplateModal(false);
     setShowCreateMenu(false);
+    setFrontendTemplateInput({ ...emptyFrontendTemplateInput });
     setConfigTab("source");
     await reload();
     router.push(`/pipelines/${pipeline.id}/edit`);
@@ -309,7 +322,7 @@ export function DashboardShell({ surface, pipelineId, runId }: DashboardShellPro
     <div className="codeup-shell">
       <CloudTopbar
         onCreate={() => {
-          setShowTemplateModal(true);
+          openTemplateModal();
           notify("请选择模板或自定义空白流水线");
         }}
         onAction={notify}
@@ -324,7 +337,7 @@ export function DashboardShell({ surface, pipelineId, runId }: DashboardShellPro
               onToggleMenu={() => setShowCreateMenu((value) => !value)}
               onOpenTemplates={() => {
                 setShowCreateMenu(false);
-                setShowTemplateModal(true);
+                openTemplateModal();
               }}
               onAutoCreate={() => void createFromTemplate("node-k8s-release")}
             />
@@ -354,7 +367,7 @@ export function DashboardShell({ surface, pipelineId, runId }: DashboardShellPro
                   onQueryChange={setQuery}
                   sidebarView={flowNavKey}
                   selectedPipelineId={selectedPipeline?.id}
-                  onOpenTemplates={() => setShowTemplateModal(true)}
+                  onOpenTemplates={openTemplateModal}
                   onRefresh={() => {
                     void reload();
                     notify("已刷新流水线快照");
@@ -426,7 +439,7 @@ export function DashboardShell({ surface, pipelineId, runId }: DashboardShellPro
             <div className="real-data-empty-state">
               <strong>暂无可配置的流水线</strong>
               <span>测试流水线数据已移除。请先接入真实应用、仓库和流水线数据，或通过真实仓库创建新流水线。</span>
-              <button className="yunxiao-primary" onClick={() => setShowTemplateModal(true)}>
+              <button className="yunxiao-primary" onClick={openTemplateModal}>
                 新建流水线
               </button>
             </div>
@@ -444,6 +457,10 @@ export function DashboardShell({ surface, pipelineId, runId }: DashboardShellPro
           onChangeCategory={setActiveCategory}
           templateMode={templateMode}
           onChangeMode={setTemplateMode}
+          frontendTemplateInput={frontendTemplateInput}
+          onChangeFrontendTemplateInput={(patch) =>
+            setFrontendTemplateInput((current) => ({ ...current, ...patch }))
+          }
           onClose={() => setShowTemplateModal(false)}
           onCreate={() => void createFromTemplate()}
           onCreateCustom={() => void createFromTemplate("empty-template")}
@@ -479,6 +496,7 @@ function createRequestFromTemplate(
   template: PipelineTemplate,
   snapshot: PlatformSnapshot,
   mode: TemplateMode,
+  frontendInput: FrontendTemplateInput = emptyFrontendTemplateInput,
 ): CreatePipelineRequest {
   const application = snapshot.applications.find((item) => item.id === template.applicationId) ?? snapshot.applications[0];
   const repository = snapshot.repositories.find((item) => item.id === template.repositoryId) ?? snapshot.repositories[0];
@@ -496,12 +514,21 @@ function createRequestFromTemplate(
   const imageArtifact = needsImageArtifact
     ? imageArtifactFromTemplate(template, applicationId, repositoryName)
     : undefined;
+  const packageUpload = template.packageMode === "container_image" ? undefined : template.packageUpload;
   const serviceConnections = uniqueStrings([
     `${repositoryProvider}-readonly`,
     ...(template.serviceConnections ?? []),
     ...(imageArtifact ? [imageArtifact.serviceConnection] : []),
   ]);
-  const variables = variablesFromTemplate(template, applicationId);
+  const frontendTemplateValues = applyFrontendTemplateInput(
+    template.key,
+    {
+      buildConfig,
+      variables: variablesFromTemplate(template, applicationId),
+      packageUpload,
+    },
+    frontendInput,
+  );
   const runtimeVariables = template.runtimeVariables?.length
     ? template.runtimeVariables
     : [
@@ -537,12 +564,13 @@ function createRequestFromTemplate(
     stages: template.stages,
     triggers: mode === "yaml" ? [...template.triggers, "yaml"] : template.triggers,
     owner,
-    variables,
+    variables: frontendTemplateValues.variables,
     runtimeVariables,
     caches: cachesFromTemplate(template, repositoryName),
     serviceConnections,
-    buildConfig,
+    buildConfig: frontendTemplateValues.buildConfig,
     imageArtifact,
+    packageUpload: frontendTemplateValues.packageUpload,
   };
 }
 

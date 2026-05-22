@@ -1947,6 +1947,74 @@ h2 {
   font-weight: 650;
 }
 
+.template-required-inputs {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 12px;
+  border: 1px solid #6ab7ff;
+  border-radius: 4px;
+  background: linear-gradient(180deg, #f1f8ff, #ffffff);
+  padding: 14px;
+  box-shadow: 0 0 0 2px rgba(22, 131, 255, 0.08);
+}
+
+.template-required-inputs header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #0f172a;
+}
+
+.template-required-inputs header span {
+  border-radius: 2px;
+  background: #e02424;
+  color: #fff;
+  font-size: 12px;
+  padding: 2px 6px;
+}
+
+.template-required-inputs label {
+  display: grid;
+  gap: 6px;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.template-required-inputs input,
+.template-required-inputs textarea {
+  width: 100%;
+  border: 1px solid #b6c5d8;
+  border-radius: 4px;
+  background: #fff;
+  color: #0f172a;
+  font: inherit;
+  font-weight: 500;
+  padding: 10px 12px;
+}
+
+.template-required-inputs textarea {
+  min-height: 86px;
+  resize: vertical;
+}
+
+.template-required-inputs label.invalid input,
+.template-required-inputs label.invalid textarea {
+  border-color: #e02424;
+  box-shadow: 0 0 0 2px rgba(224, 36, 36, 0.08);
+}
+
+.template-required-inputs em {
+  color: #c81e1e;
+  font-style: normal;
+  font-weight: 600;
+}
+
+.yunxiao-primary:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
 .template-modal-footer {
   justify-content: flex-end;
   flex-shrink: 0;
@@ -6772,6 +6840,7 @@ button.flow-workspace-card:hover,
 .codeup-shell .template-option,
 .codeup-shell .template-empty-state,
 .codeup-shell .template-config-preview .field,
+.codeup-shell .template-required-inputs,
 .codeup-shell .mini-flow-group i {
   border-color: rgba(125, 197, 255, 0.22);
   background:
@@ -6819,6 +6888,28 @@ button.flow-workspace-card:hover,
   border: 1px solid rgba(66, 215, 255, 0.32);
   background: rgba(66, 215, 255, 0.12);
   color: #a5f3fc;
+}
+
+.codeup-shell .template-required-inputs {
+  border-color: rgba(66, 215, 255, 0.64);
+  box-shadow: 0 0 0 1px rgba(66, 215, 255, 0.12), 0 0 28px rgba(66, 215, 255, 0.1);
+}
+
+.codeup-shell .template-required-inputs header,
+.codeup-shell .template-required-inputs label {
+  color: var(--trend-text);
+}
+
+.codeup-shell .template-required-inputs input,
+.codeup-shell .template-required-inputs textarea {
+  border-color: rgba(125, 197, 255, 0.3);
+  background: rgba(5, 13, 26, 0.72);
+  color: var(--trend-text);
+}
+
+.codeup-shell .template-required-inputs input::placeholder,
+.codeup-shell .template-required-inputs textarea::placeholder {
+  color: rgba(165, 196, 229, 0.58);
 }
 
 .source-summary-button {

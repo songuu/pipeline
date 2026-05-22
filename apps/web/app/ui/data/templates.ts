@@ -4,6 +4,7 @@ import type {
   ImageArtifactConfig,
   LifecycleStageKey,
   PackageMode,
+  PackageUploadConfig,
   PipelineBuildConfig,
   PipelineCacheConfig,
   PipelineDefinition,
@@ -33,6 +34,7 @@ export interface PipelineTemplate {
   chips: string[];
   flowGroups: string[][];
   buildConfig: PipelineBuildConfig;
+  packageUpload?: PackageUploadConfig;
   imageArtifact?: Partial<ImageArtifactConfig>;
   variables?: GlobalParam[];
   runtimeVariables?: GlobalParam[];
@@ -269,6 +271,64 @@ export const pipelineTemplates: PipelineTemplate[] = [
       { label: "产物目录", value: "dist / build / out" },
       { label: "上传目标", value: "阿里云 OSS Bucket" },
       { label: "发布方式", value: "OSS 前缀切换 / CDN 刷新预留" },
+    ],
+  },
+  {
+    key: "node-frontend-custom-static",
+    category: "Node.js",
+    title: "Node.js · 自定义前端打包、访问域名",
+    subtitle: "前端静态站点",
+    badge: "自定义命令",
+    icon: "F",
+    language: "node",
+    applicationId: "",
+    repositoryId: "",
+    environment: "staging",
+    strategy: "rolling",
+    canaryPercent: 100,
+    packageMode: "static_site",
+    requiresApproval: false,
+    triggers: ["push main", "manual"],
+    stages: ["source", "test", "build", "env", "package", "upload", "deploy", "promote"],
+    chips: ["前端依赖安装", "手输打包命令", "静态资源上传", "访问域名回写"],
+    flowGroups: [["JavaScript 代码扫描", "前端单元测试"], ["自定义前端打包"], ["静态资源发布"]],
+    buildConfig: {
+      packageMode: "static_site",
+      runtime: "node",
+      contextPath: ".",
+      packageBuildCommandMode: "custom",
+      packageBuildScript: "build",
+      packageOutputPaths: ["dist", "build", "out"],
+    },
+    packageUpload: {
+      provider: "static-server",
+      customUploadCommandMode: "provider",
+      endpoint: "https://static.example.com/frontend",
+      targetPathTemplate: "${application.id}/${environment}/${run.id}/${artifact.name}",
+      serviceConnection: "static-server-deploy",
+    },
+    serviceConnections: ["static-server-deploy", "packages-artifact"],
+    variables: [
+      {
+        key: "PUBLIC_BASE_URL",
+        value: "",
+        description: "使用者填写：前端构建时使用的公开访问域名。",
+        injectionTiming: "build",
+        targetStages: ["build", "upload", "deploy"],
+      },
+      {
+        key: "BUILD_ARGS",
+        value: "",
+        description: "使用者填写：前端打包命令需要的额外参数。",
+        injectionTiming: "build",
+        targetStages: ["build"],
+      },
+    ],
+    settings: [
+      { label: "打包命令", value: "创建后由使用者填写执行命令和参数" },
+      { label: "产物目录", value: "dist / build / out" },
+      { label: "上传目标", value: "自建静态服务器" },
+      { label: "访问域名", value: "创建后由使用者填写" },
     ],
   },
   {

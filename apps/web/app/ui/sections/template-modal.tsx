@@ -9,6 +9,7 @@ import {
   templateCategories,
   type TemplateMode,
 } from "../data/templates";
+import { FRONTEND_STATIC_TEMPLATE_KEY, type FrontendTemplateInput } from "../data/template-inputs";
 import { packageModeLabel, stageLabelForPackageMode } from "../pipeline-config/model";
 
 interface TemplateModalProps {
@@ -20,6 +21,8 @@ interface TemplateModalProps {
   onChangeCategory: (category: string) => void;
   templateMode: TemplateMode;
   onChangeMode: (mode: TemplateMode) => void;
+  frontendTemplateInput: FrontendTemplateInput;
+  onChangeFrontendTemplateInput: (patch: Partial<FrontendTemplateInput>) => void;
   onClose: () => void;
   onCreate: () => void;
   onCreateCustom: () => void;
@@ -34,6 +37,8 @@ export function TemplateModal({
   onChangeCategory,
   templateMode,
   onChangeMode,
+  frontendTemplateInput,
+  onChangeFrontendTemplateInput,
   onClose,
   onCreate,
   onCreateCustom,
@@ -46,6 +51,14 @@ export function TemplateModal({
     pipelineTemplates[0];
   const selectedRepository =
     snapshot.repositories.find((repo) => repo.id === selectedTemplate.repositoryId) ?? snapshot.repositories[0];
+  const buildConfigSummary =
+    selectedTemplate.buildConfig.packageBuildCommandMode === "custom"
+      ? `手输命令 · ${selectedTemplate.buildConfig.packageBuildCommand?.trim() || "创建后填写命令和参数"}`
+      : `package.json scripts.${selectedTemplate.buildConfig.packageBuildScript}`;
+  const needsFrontendTemplateInput = selectedTemplate.key === FRONTEND_STATIC_TEMPLATE_KEY;
+  const frontendBuildCommandMissing = needsFrontendTemplateInput && !frontendTemplateInput.buildCommand.trim();
+  const frontendDomainMissing = needsFrontendTemplateInput && !frontendTemplateInput.publicBaseUrl.trim();
+  const canSubmitTemplate = !frontendBuildCommandMissing && !frontendDomainMissing;
 
   const selectCategory = (category: string) => {
     onChangeCategory(category);
@@ -170,7 +183,7 @@ export function TemplateModal({
               </Field>
               <Field label="构建配置">
                 <span>
-                  {packageModeLabel(selectedTemplate.buildConfig.packageMode ?? selectedTemplate.packageMode)} · {selectedTemplate.buildConfig.packageBuildScript}
+                  {packageModeLabel(selectedTemplate.buildConfig.packageMode ?? selectedTemplate.packageMode)} · {buildConfigSummary}
                 </span>
               </Field>
               <Field label="制品路径">
@@ -179,6 +192,44 @@ export function TemplateModal({
               <Field label="服务连接">
                 <span>{selectedTemplate.serviceConnections?.join(" / ") || "创建后配置"}</span>
               </Field>
+              {needsFrontendTemplateInput && (
+                <section className="template-required-inputs" aria-label="前端发布参数">
+                  <header>
+                    <strong>前端发布参数</strong>
+                    <span>必填</span>
+                  </header>
+                  <label className={frontendBuildCommandMissing ? "invalid" : ""}>
+                    <span>执行命令</span>
+                    <textarea
+                      aria-label="执行命令"
+                      value={frontendTemplateInput.buildCommand}
+                      onChange={(event) => onChangeFrontendTemplateInput({ buildCommand: event.target.value })}
+                      placeholder="pnpm build"
+                      rows={3}
+                    />
+                    {frontendBuildCommandMissing && <em>请输入执行命令</em>}
+                  </label>
+                  <label>
+                    <span>命令参数</span>
+                    <input
+                      aria-label="命令参数"
+                      value={frontendTemplateInput.buildArgs}
+                      onChange={(event) => onChangeFrontendTemplateInput({ buildArgs: event.target.value })}
+                      placeholder="--mode staging --base /"
+                    />
+                  </label>
+                  <label className={frontendDomainMissing ? "invalid" : ""}>
+                    <span>访问域名</span>
+                    <input
+                      aria-label="访问域名"
+                      value={frontendTemplateInput.publicBaseUrl}
+                      onChange={(event) => onChangeFrontendTemplateInput({ publicBaseUrl: event.target.value })}
+                      placeholder="https://your-domain.example"
+                    />
+                    {frontendDomainMissing && <em>请输入访问域名</em>}
+                  </label>
+                </section>
+              )}
               <Field label="完整生命周期">
                 <span>
                   {selectedTemplate.stages
@@ -196,7 +247,7 @@ export function TemplateModal({
           <button className="cloud-secondary" onClick={onClose}>
             取消
           </button>
-          <button className="yunxiao-primary" onClick={onCreate}>
+          <button className="yunxiao-primary" onClick={onCreate} disabled={!canSubmitTemplate}>
             创建
           </button>
         </footer>
