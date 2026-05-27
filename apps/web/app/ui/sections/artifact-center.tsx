@@ -3,14 +3,14 @@
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Activity, Boxes, Check, Copy, MapPin, PackageCheck, Pause, Play, Rocket, RotateCcw, Server, Terminal, TrendingUp } from "lucide-react";
-import type { Artifact, CanaryTrafficRegion, EnvironmentType, PackageMode, PlatformSnapshot, ReleaseDeployment } from "@deploy-management/shared";
+import type { Artifact, CanaryTrafficRegion, EnvironmentType, PackageMode, PipelineRun, PlatformSnapshot, ReleaseDeployment } from "@deploy-management/shared";
 import { ReleaseEventMiniTimeline, ReleaseEventTimeline, sortReleaseEvents } from "../components/release-event-timeline";
 
 interface ArtifactCenterProps {
   snapshot: PlatformSnapshot;
   onCopy: (value: string, label: string) => void | Promise<void>;
   onDeploy: (artifactId: string, environment: EnvironmentType) => Promise<void>;
-  onCanaryDeploy: (artifactId: string, environment: EnvironmentType, regions: CanaryTrafficRegion[]) => Promise<void>;
+  onCanaryDeploy: (artifactId: string, environment: EnvironmentType, regions: CanaryTrafficRegion[], baselineArtifactId?: string) => Promise<void>;
   onReleaseAction: (
     releaseId: string,
     action: "advance" | "pause" | "resume" | "promote" | "rollback",
@@ -32,6 +32,7 @@ export function ArtifactCenter({ snapshot, onCopy, onDeploy, onCanaryDeploy, onR
   const [copiedKey, setCopiedKey] = useState("");
   const [selectedReleaseId, setSelectedReleaseId] = useState("");
   const [canaryRegionsByArtifact, setCanaryRegionsByArtifact] = useState<Record<string, CanaryTrafficRegion[]>>({});
+  const [baselineByArtifact, setBaselineByArtifact] = useState<Record<string, string>>({});
   const imageArtifacts = snapshot.artifacts.filter((artifact) => artifact.type === "image");
   const supportArtifacts = snapshot.artifacts.filter((artifact) => artifact.type !== "image");
   const latestRelease = snapshot.releases[0];
@@ -94,9 +95,10 @@ export function ArtifactCenter({ snapshot, onCopy, onDeploy, onCanaryDeploy, onR
     const regions = canaryRegionsFor(artifactId)
       .map((region) => ({ ...region, percent: clampPercent(region.percent) }))
       .filter((region) => region.enabled && region.percent > 0);
+    const selectedBaseline = baselineByArtifact[artifactId];
     setDeployingKey(key);
     try {
-      await onCanaryDeploy(artifactId, environment, regions);
+      await onCanaryDeploy(artifactId, environment, regions, selectedBaseline || undefined);
     } finally {
       setDeployingKey("");
     }
@@ -215,6 +217,15 @@ export function ArtifactCenter({ snapshot, onCopy, onDeploy, onCanaryDeploy, onR
                     <CanaryRegionConfigurator
                       regions={canaryRegionsFor(artifact.id)}
                       onChange={(regionId, patch) => updateCanaryRegion(artifact.id, regionId, patch)}
+                    />
+                    <BaselineVersionSelector
+                      candidateArtifactId={artifact.id}
+                      artifacts={imageArtifacts}
+                      runs={snapshot.runs}
+                      selectedBaselineId={baselineByArtifact[artifact.id] ?? ""}
+                      onSelect={(baselineId) =>
+                        setBaselineByArtifact((current) => ({ ...current, [artifact.id]: baselineId }))
+                      }
                     />
                     <div className="artifact-deploy-row canary">
                       {releaseTargets.map((environment) => {
@@ -460,6 +471,45 @@ function CanaryRegionConfigurator({
         ))}
       </div>
       <p>选中区域会按各自百分比先切入新版本；灰度通过后再推进到全量。</p>
+    </div>
+  );
+}
+
+function BaselineVersionSelector({
+  candidateArtifactId,
+  artifacts,
+  runs,
+  selectedBaselineId,
+  onSelect,
+}: {
+  candidateArtifactId: string;
+  artifacts: Artifact[];
+  runs: PipelineRun[];
+  selectedBaselineId: string;
+  onSelect: (baselineId: string) => void;
+}) {
+  const options = artifacts.filter((item) => item.id !== candidateArtifactId);
+  if (options.length === 0) return null;
+  return (
+    <div className="baseline-version-selector">
+      <label>
+        <span>基线版本</span>
+        <select
+          value={selectedBaselineId}
+          onChange={(event) => onSelect(event.target.value)}
+        >
+          <option value="">自动（最近稳定版本）</option>
+          {options.map((item) => {
+            const run = runs.find((r) => r.id === item.runId);
+            const label = `${item.version} · ${item.digest.slice(0, 16)} · ${run?.refName ?? "unknown"}`;
+            return (
+              <option key={item.id} value={item.id}>
+                {label}
+              </option>
+            );
+          })}
+        </select>
+      </label>
     </div>
   );
 }

@@ -246,6 +246,7 @@ export function DashboardShell({ surface, pipelineId, runId }: DashboardShellPro
     artifactId: string,
     environment: EnvironmentType,
     regions: CanaryTrafficRegion[] = [],
+    baselineArtifactId?: string,
   ): Promise<void> => {
     try {
       const artifact = snapshot?.artifacts.find((item) => item.id === artifactId);
@@ -260,6 +261,7 @@ export function DashboardShell({ surface, pipelineId, runId }: DashboardShellPro
         strategy: "canary",
         canaryPercent,
         packageMode,
+        baselineArtifactId,
         rolloutStrategy,
         rolloutPolicy: {
           ...(rolloutStrategy.packageMode === "container_image" ? rolloutStrategy.policy : {}),

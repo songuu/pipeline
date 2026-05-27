@@ -176,6 +176,7 @@ export type ReleasePlan = {
   target: ReleaseTarget;
   policy: CanaryRolloutPolicy;
   rolloutStrategy?: RolloutStrategyConfig;
+  baselineArtifactId?: string;
   createdBy: string;
   status: ReleasePlanStatus;
   createdAt: string;
@@ -253,6 +254,8 @@ export type ReleaseCanaryActionRequest = {
   analysis?: Partial<CanaryAnalysisSnapshot>;
 };
 
+export type BaselineSource = "user-selected" | "auto-resolved";
+
 export type DeployArtifactRequest = {
   environment?: EnvironmentType;
   actor?: string;
@@ -263,6 +266,7 @@ export type DeployArtifactRequest = {
   rolloutStrategy?: RolloutStrategyConfig;
   deploymentTargetId?: string;
   releasePlanId?: string;
+  baselineArtifactId?: string;
   namespace?: string;
   serviceConnection?: string;
   target?: ReleaseTarget;
@@ -301,6 +305,8 @@ export type ReleaseDeployment = {
   rolloutSteps?: CanaryRolloutStep[];
   currentTrafficPercent?: number;
   currentRegionTraffic?: CanaryRolloutStepRegion[];
+  baselineArtifactId?: string;
+  baselineSource?: BaselineSource;
   stableImageRef?: string;
   rollbackImageRef?: string;
   rollbackReleaseId?: string;

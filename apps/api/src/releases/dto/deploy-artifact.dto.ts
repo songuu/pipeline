@@ -92,6 +92,7 @@ export const deployArtifactSchema = z.object({
   packageMode: z.enum(PACKAGE_MODES).optional(),
   deploymentTargetId: z.string().trim().min(1).optional(),
   releasePlanId: z.string().trim().min(1).optional(),
+  baselineArtifactId: z.string().trim().min(1).max(128).optional(),
   rolloutPolicy: rolloutPolicySchema.optional(),
   rolloutStrategy: rolloutStrategySchema.optional(),
   namespace: z.string().trim().min(1).optional(),

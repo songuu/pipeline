@@ -1,0 +1,1 @@
+{"file":"2026-05-27-canary-baseline-decoupling.md","title":"灰度发布基线版本解耦","date":"2026-05-27","tags":["solution","release","canary","decoupling"],"summary":"将 findLatestStableRelease 从唯一来源降级为 fallback，新增 baselineArtifactId 可选参数实现用户显式选择灰度对照版本"}

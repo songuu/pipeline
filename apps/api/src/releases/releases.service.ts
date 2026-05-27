@@ -5,6 +5,7 @@ import path from "node:path";
 import { BadRequestException, Inject, Injectable } from "@nestjs/common";
 import type {
   Artifact,
+  BaselineSource,
   CanaryAnalysisSnapshot,
   CanaryRolloutPolicy,
   CanaryRolloutStep,
@@ -96,7 +97,12 @@ export class ReleasesService {
     const initialStep = rolloutSteps?.find((step) => step.status === "active");
     const initialTrafficPercent = initialStep?.percent;
     const initialRegionTraffic = initialStep?.regions;
-    const stableRelease = this.findLatestStableRelease(run.applicationId, environment);
+    const { stableRelease, baselineArtifactId, baselineSource } = this.resolveBaseline(
+      request,
+      run.applicationId,
+      environment,
+      packageMode,
+    );
     const deploymentTarget = await this.environments.resolveDeploymentTarget({
       deploymentTargetId: request.deploymentTargetId,
       environment,
@@ -142,6 +148,7 @@ export class ReleasesService {
       target,
       policy: effectivePolicy,
       rolloutStrategy,
+      baselineArtifactId,
       createdBy: actor,
       status: "running",
       createdAt: now,
@@ -200,6 +207,11 @@ export class ReleasesService {
         `锁定${packageModeLabel(packageMode)}制品 ${artifact.id}`,
         `制品引用 ${artifactImageReference(artifact)}`,
         `digest ${artifact.digest}`,
+        baselineSource === "user-selected"
+          ? `基线版本（用户指定）: ${baselineArtifactId}`
+          : stableRelease
+            ? `基线版本（自动解析）: ${stableRelease.imageRef}`
+            : "基线版本: 无（首次发布）",
         ...(targetPreflight.ready ? ["目标预检通过。"] : targetPreflight.issues.map((issue) => `目标预检提示：${issue}`)),
         ...(rolloutPolicy ? [`灰度批次 ${rolloutPolicy.steps.join("% -> ")}%`] : []),
         ...(rolloutPolicy?.regions?.length ? [`灰度区域 ${regionTrafficLabel(rolloutPolicy.regions)}`] : []),
@@ -215,6 +227,8 @@ export class ReleasesService {
       rolloutSteps,
       currentTrafficPercent: initialTrafficPercent ?? 100,
       currentRegionTraffic: initialRegionTraffic,
+      baselineArtifactId,
+      baselineSource,
       stableImageRef: stableRelease?.imageRef,
       rollbackImageRef: stableRelease?.imageRef,
       rollbackReleaseId: stableRelease?.id,
@@ -607,6 +621,39 @@ export class ReleasesService {
       throw new BadRequestException(`Release ${releaseId} 当前状态 ${release.status} 不允许灰度操作`);
     }
     return release;
+  }
+
+  private resolveBaseline(
+    request: DeployArtifactRequest,
+    applicationId: string,
+    environment: EnvironmentType,
+    candidatePackageMode: PackageMode,
+  ): { stableRelease: ReleaseDeployment | undefined; baselineArtifactId: string | undefined; baselineSource: BaselineSource } {
+    if (request.baselineArtifactId) {
+      const baselineArtifact = this.artifacts.get(request.baselineArtifactId);
+      const baselineRun = this.runs.get(baselineArtifact.runId);
+      if (baselineRun.applicationId !== applicationId) {
+        throw new BadRequestException(
+          `基线制品所属应用 (${baselineRun.applicationId}) 与当前应用 (${applicationId}) 不一致`,
+        );
+      }
+      const baselinePackageMode = baselineRun.definitionSnapshot.buildConfig?.packageMode ?? "container_image";
+      if (baselinePackageMode !== candidatePackageMode) {
+        throw new BadRequestException(
+          `基线制品的打包模式 (${baselinePackageMode}) 与候选制品 (${candidatePackageMode}) 不一致`,
+        );
+      }
+      const stableRelease = this.repo
+        .snapshot()
+        .find((release) => release.artifactId === request.baselineArtifactId && release.status === "success");
+      return {
+        stableRelease: stableRelease ?? this.findLatestStableRelease(applicationId, environment),
+        baselineArtifactId: request.baselineArtifactId,
+        baselineSource: "user-selected" as const,
+      };
+    }
+    const stableRelease = this.findLatestStableRelease(applicationId, environment);
+    return { stableRelease, baselineArtifactId: undefined, baselineSource: "auto-resolved" as const };
   }
 
   private findLatestStableRelease(applicationId: string, environment: EnvironmentType): ReleaseDeployment | undefined {

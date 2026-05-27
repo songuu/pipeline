@@ -10,3 +10,4 @@ node_modules/
 dist/
 apps/api/dist
 *.log
+.handoff/
