@@ -4420,6 +4420,10 @@ h2 {
   font-style: normal;
 }
 
+.artifact-card-head em {
+  word-break: break-all;
+}
+
 .release-live-card small,
 .artifact-management-card small,
 .release-row code,
@@ -4481,6 +4485,7 @@ h2 {
 
 .artifact-management-card {
   display: grid;
+  min-width: 0;
   gap: 12px;
   overflow: hidden;
   border-color: rgba(18, 255, 210, 0.32);
@@ -4569,13 +4574,14 @@ h2 {
 
 .canary-region-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(178px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
   gap: 8px;
 }
 
 .canary-region-row {
   display: grid;
-  grid-template-columns: 16px minmax(0, 1fr) 58px 12px;
+  min-width: 0;
+  grid-template-columns: 16px minmax(0, 1fr) 56px 12px;
   align-items: center;
   gap: 8px;
   border: 1px solid rgba(96, 165, 250, 0.18);
@@ -4612,7 +4618,8 @@ h2 {
 }
 
 .canary-region-row input[type="number"] {
-  width: 58px;
+  width: 56px;
+  min-width: 0;
   min-height: 28px;
   border: 1px solid rgba(96, 165, 250, 0.24);
   border-radius: 6px;
@@ -4633,12 +4640,35 @@ h2 {
   line-height: 1.5;
 }
 
+.baseline-version-selector,
+.baseline-version-selector label {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+.baseline-version-selector span {
+  color: #dff8ff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.baseline-version-selector select {
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
 .artifact-copy-row .artifact-copy-button {
+  min-width: 0;
   width: auto;
   flex: 1 1 160px;
 }
 
 .deploy-target {
+  min-width: 0;
   flex: 1 1 112px;
   min-height: 32px;
   padding: 0 10px;
