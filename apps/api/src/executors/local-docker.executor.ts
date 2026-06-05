@@ -558,7 +558,11 @@ export class LocalDockerExecutor implements ExecutorAdapter {
 
   private async installDependencies(contextDir: string, record: LocalDockerRecord, stageKey: LifecycleStageKey): Promise<void> {
     if (await exists(path.join(contextDir, "pnpm-lock.yaml"))) {
-      await this.runCommand("pnpm", ["install", "--frozen-lockfile"], {
+      // pnpm 10+ blocks dependency build scripts (e.g. sharp) by default and exits
+      // non-zero with ERR_PNPM_IGNORED_BUILDS. A build executor already runs the
+      // repo's own (untrusted) build, so allowing dependency build scripts is
+      // consistent with the threat model and required to install native deps.
+      await this.runCommand("pnpm", ["install", "--frozen-lockfile", "--config.dangerouslyAllowAllBuilds=true"], {
         cwd: contextDir,
         record,
         stageKey,

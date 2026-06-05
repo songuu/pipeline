@@ -87,6 +87,93 @@ bash scripts/deploy-server.sh      # = pnpm deploy:server
 > `.env.production` 是 untracked，`git pull` 不会动它，配置在服务器上长期保留。
 > 服务器 checkout 须保持干净；若有本地改动导致 `git pull --ff-only` 失败（fail-safe），手动 `git reset --hard origin/main` 后重跑。
 
+## 三·五、Tekton 模式：集群资源准备（`EXECUTOR=tekton` 必读）
+
+> `.env.production` 里 tekton 组的占位值不能乱填，须从 k8s 集群 + Tekton 安装查出/创建。bridge 跑在集群外 VM，非 in-cluster。
+
+### 不用改（默认即对）
+
+```bash
+TEKTON_BRIDGE_URL=http://127.0.0.1:5050   # api→bridge 同机回环
+TEKTON_BRIDGE_ADDR=127.0.0.1:5050          # bridge 只监听本机，防火墙勿开 5050
+TEKTON_BRIDGE_BACKEND=                      # 留空！-tags tekton 构建默认走真实 Tekton；仅设 simulated 才回退
+TEKTON_PIPELINE_REF=                        # 留空 = 用内置 inline pipelineSpec（推荐，零额外安装）
+```
+
+### 前置：集群装 Tekton Pipelines
+
+```bash
+KUBECONFIG=/opt/deploy-management/shared/kubeconfig \
+  kubectl apply -f https://storage.googleapis.com/tekton-releases/pipeline/latest/release.yaml
+```
+
+### 创建 namespace / SA / PVC / docker secret
+
+```bash
+export KUBECONFIG=/opt/deploy-management/shared/kubeconfig
+
+# 1. namespace（建议单独建，勿混 default）
+kubectl create ns deploy-ci
+
+# 2. ServiceAccount（跑 Pipeline 的身份）
+kubectl -n deploy-ci create sa tekton-pipeline
+
+# 3. 源码 workspace PVC（git clone 落盘、task 间共享）
+cat <<'EOF' | kubectl apply -f -
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: tekton-source, namespace: deploy-ci }
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: { requests: { storage: 5Gi } }   # 按需调 size / 加 storageClassName
+EOF
+
+# 4. 推镜像到 ACR 的 docker secret，并绑到上面 SA
+kubectl -n deploy-ci create secret docker-registry acr-cred \
+  --docker-server=https://newdemo123-cn-hangzhou.devops.aliyuncs.com \
+  --docker-username=quxxrbti_newdemo123 \
+  --docker-password=Aa@123456
+kubectl -n deploy-ci patch sa tekton-pipeline \
+  -p '{"secrets":[{"name":"acr-cred"}]}'
+```
+
+### kubeconfig 放到 VM（集群外连接必填）
+
+```bash
+# 从有 kubectl 权限的机器拷过去
+mkdir -p /opt/deploy-management/shared
+scp ~/.kube/config root@<VM>:/opt/deploy-management/shared/kubeconfig
+chmod 600 /opt/deploy-management/shared/kubeconfig
+# VM 上验证能连：
+KUBECONFIG=/opt/deploy-management/shared/kubeconfig kubectl get ns
+```
+
+> bridge 跑在集群内（同 Pod）才可留空走 in-cluster；VM 外连必填 `KUBECONFIG`。
+
+### 最小可跑 `.env.production` tekton 组（按上面值替换）
+
+```bash
+EXECUTOR=tekton
+TEKTON_ALLOW_SIMULATED_FALLBACK=false
+TEKTON_BRIDGE_URL=http://127.0.0.1:5050
+TEKTON_BRIDGE_ADDR=127.0.0.1:5050
+TEKTON_BRIDGE_BACKEND=
+TEKTON_BRIDGE_NAMESPACE=deploy-ci
+KUBECONFIG=/opt/deploy-management/shared/kubeconfig
+TEKTON_SERVICE_ACCOUNT=tekton-pipeline
+TEKTON_SOURCE_PVC=tekton-source
+TEKTON_DOCKER_SECRET=acr-cred
+TEKTON_PIPELINE_REF=
+```
+
+| 变量 | 来源 | 怎么拿 |
+|------|------|--------|
+| `TEKTON_BRIDGE_NAMESPACE` | 你建的 ns | `kubectl create ns deploy-ci` |
+| `TEKTON_SERVICE_ACCOUNT` | ns 下 SA | `kubectl -n deploy-ci create sa tekton-pipeline` |
+| `TEKTON_SOURCE_PVC` | ns 下 PVC | 上面 PVC yaml apply |
+| `TEKTON_DOCKER_SECRET` | docker-registry secret | `kubectl create secret docker-registry acr-cred ...` 并 patch 到 SA |
+| `KUBECONFIG` | 集群凭据文件 | scp `~/.kube/config` 到 VM `/opt/.../shared/kubeconfig` |
+
 ## 四、部署后验证（完整且正确运行）
 
 - [ ] `pm2 status` 三服务 online，无 restart 抖动
