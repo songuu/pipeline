@@ -17,6 +17,12 @@ const rolloutPolicySchema = z.object({
   minSuccessRate: z.number().min(0).max(100).optional(),
   maxErrorRate: z.number().min(0).max(100).optional(),
   maxP95LatencyMs: z.number().int().min(1).max(120_000).optional(),
+  baselineTolerance: z.number().min(0).max(100).optional(),
+  metricQueries: z.object({
+    successRate: z.string().trim().min(1).max(1000).optional(),
+    errorRate: z.string().trim().min(1).max(1000).optional(),
+    p95LatencyMs: z.string().trim().min(1).max(1000).optional(),
+  }).optional(),
   rollbackOnFailure: z.boolean().optional(),
 });
 
@@ -32,6 +38,12 @@ const rolloutStrategySchema = z.discriminatedUnion("packageMode", [
       minSuccessRate: z.number().min(0).max(100),
       maxErrorRate: z.number().min(0).max(100),
       maxP95LatencyMs: z.number().int().min(1).max(120_000),
+      baselineTolerance: z.number().min(0).max(100).optional(),
+      metricQueries: z.object({
+        successRate: z.string().trim().min(1).max(1000).optional(),
+        errorRate: z.string().trim().min(1).max(1000).optional(),
+        p95LatencyMs: z.string().trim().min(1).max(1000).optional(),
+      }).optional(),
       rollbackOnFailure: z.boolean(),
     }),
   }),
@@ -116,6 +128,7 @@ export const canaryActionSchema = z.object({
     successRate: z.number().min(0).max(100).optional(),
     errorRate: z.number().min(0).max(100).optional(),
     p95LatencyMs: z.number().int().min(0).optional(),
+    source: z.enum(["prometheus", "aliyun-cms", "http-probe", "simulated", "client"]).optional(),
     message: z.string().trim().max(500).optional(),
   }).optional(),
 });

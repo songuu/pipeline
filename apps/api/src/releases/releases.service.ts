@@ -551,6 +551,47 @@ export class ReleasesService {
     return updated;
   }
 
+  async recordCanaryAnalysis(
+    releaseId: string,
+    analysis: ReleaseCanaryActionRequest["analysis"],
+    actor = "system:canary-watcher",
+  ): Promise<ReleaseDeployment> {
+    const release = this.ensureCanaryRelease(releaseId);
+    const steps = release.rolloutSteps ?? [];
+    const activeIndex = steps.findIndex((step) => step.status === "active");
+    if (activeIndex === -1) {
+      throw new BadRequestException("灰度没有处于 active 的批次，无法写入采样结果");
+    }
+    const snapshot = mergeAnalysis(release, analysis);
+    const updatedSteps = steps.map((step, index) =>
+      index === activeIndex
+        ? {
+            ...step,
+            analysis: snapshot,
+            message: snapshot.message,
+          }
+        : step,
+    );
+    const updated = await this.repo.update(release.id, {
+      rolloutSteps: updatedSteps,
+      updatedAt: snapshot.sampledAt,
+      logs: [...release.logs, `${actor} 采样灰度指标：${snapshot.message}`],
+    });
+    await this.updateReleaseExecution(updated, release.status === "paused" ? "paused" : "canarying");
+    return updated;
+  }
+
+  async recordCanaryAutomationEvent(
+    releaseId: string,
+    type: Extract<ReleaseEventType, "canary_analysis_sampled" | "canary_auto_promoted" | "canary_auto_rolled_back">,
+    message: string,
+    payload: Record<string, unknown> = {},
+    actor = "system:canary-watcher",
+  ): Promise<ReleaseEvent> {
+    const release = this.get(releaseId);
+    return this.recordReleaseEvent(release, type, message, payload, actor);
+  }
+
   private async recordReleaseEvent(
     release: ReleaseDeployment,
     type: ReleaseEventType,
@@ -1091,6 +1132,8 @@ function buildContainerRolloutPolicy(request: DeployArtifactRequest, run: Pipeli
     minSuccessRate: request.rolloutPolicy?.minSuccessRate ?? 99,
     maxErrorRate: request.rolloutPolicy?.maxErrorRate ?? 1,
     maxP95LatencyMs: request.rolloutPolicy?.maxP95LatencyMs ?? 800,
+    baselineTolerance: request.rolloutPolicy?.baselineTolerance,
+    metricQueries: request.rolloutPolicy?.metricQueries,
     rollbackOnFailure: request.rolloutPolicy?.rollbackOnFailure ?? true,
   };
 }
@@ -1103,6 +1146,8 @@ function canaryPolicyFromRolloutStrategy(
     return {
       ...strategy.policy,
       regions: normalizeTrafficRegions(request.rolloutPolicy?.regions ?? strategy.policy.regions),
+      baselineTolerance: request.rolloutPolicy?.baselineTolerance ?? strategy.policy.baselineTolerance,
+      metricQueries: request.rolloutPolicy?.metricQueries ?? strategy.policy.metricQueries,
     };
   }
   const thresholds = request.rolloutPolicy;
@@ -1118,6 +1163,8 @@ function canaryPolicyFromRolloutStrategy(
     minSuccessRate: thresholds?.minSuccessRate ?? 99,
     maxErrorRate: thresholds?.maxErrorRate ?? 1,
     maxP95LatencyMs: thresholds?.maxP95LatencyMs ?? 800,
+    baselineTolerance: thresholds?.baselineTolerance,
+    metricQueries: thresholds?.metricQueries,
     rollbackOnFailure: strategy.policy.rollbackOnFailure,
   };
 }
@@ -1295,6 +1342,7 @@ function mergeAnalysis(
     successRate,
     errorRate,
     p95LatencyMs,
+    source: patch?.source ?? "client",
     message: patch?.message ?? (failed ? "指标未通过灰度门禁" : "指标通过灰度门禁"),
   };
 }
@@ -1309,6 +1357,8 @@ function fullReleasePolicy(request: DeployArtifactRequest, run: PipelineRun): Ca
     minSuccessRate: request.rolloutPolicy?.minSuccessRate ?? 99,
     maxErrorRate: request.rolloutPolicy?.maxErrorRate ?? 1,
     maxP95LatencyMs: request.rolloutPolicy?.maxP95LatencyMs ?? 800,
+    baselineTolerance: request.rolloutPolicy?.baselineTolerance,
+    metricQueries: request.rolloutPolicy?.metricQueries,
     rollbackOnFailure: request.rolloutPolicy?.rollbackOnFailure ?? (run.definitionSnapshot.targetEnvironment === "prod"),
   };
 }

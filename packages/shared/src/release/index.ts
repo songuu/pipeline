@@ -23,6 +23,9 @@ export type ReleaseEventType =
   | "deploy_succeeded"
   | "deploy_failed"
   | "canary_advanced"
+  | "canary_analysis_sampled"
+  | "canary_auto_promoted"
+  | "canary_auto_rolled_back"
   | "canary_paused"
   | "canary_resumed"
   | "canary_promoted"
@@ -47,6 +50,7 @@ export type CanaryAnalysisSnapshot = {
   successRate: number;
   errorRate: number;
   p95LatencyMs: number;
+  source: "prometheus" | "aliyun-cms" | "http-probe" | "simulated" | "client";
   message: string;
 };
 
@@ -70,6 +74,12 @@ export type CanaryRolloutPolicy = {
   minSuccessRate: number;
   maxErrorRate: number;
   maxP95LatencyMs: number;
+  baselineTolerance?: number;
+  metricQueries?: {
+    successRate?: string;
+    errorRate?: string;
+    p95LatencyMs?: string;
+  };
   rollbackOnFailure: boolean;
 };
 
@@ -316,4 +326,3 @@ export type ReleaseDeployment = {
   deployedAt?: string;
   completedAt?: string;
 };
-

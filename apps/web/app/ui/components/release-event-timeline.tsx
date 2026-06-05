@@ -109,6 +109,9 @@ function releaseEventLabel(type: ReleaseEventType): string {
     deploy_succeeded: "部署成功",
     deploy_failed: "部署失败",
     canary_advanced: "灰度推进",
+    canary_analysis_sampled: "灰度采样",
+    canary_auto_promoted: "自动推进",
+    canary_auto_rolled_back: "自动回滚",
     canary_paused: "灰度暂停",
     canary_resumed: "灰度继续",
     canary_promoted: "全量发布",
@@ -119,21 +122,21 @@ function releaseEventLabel(type: ReleaseEventType): string {
 }
 
 function releaseEventTone(type: ReleaseEventType): string {
-  if (type === "deploy_failed" || type === "release_rolled_back") return "danger";
+  if (type === "deploy_failed" || type === "release_rolled_back" || type === "canary_auto_rolled_back") return "danger";
   if (type === "canary_paused") return "warning";
-  if (type === "deploy_succeeded" || type === "canary_promoted" || type === "environment_lock_released") return "success";
-  if (type === "deploy_started" || type === "canary_advanced" || type === "canary_resumed") return "active";
+  if (type === "deploy_succeeded" || type === "canary_promoted" || type === "canary_auto_promoted" || type === "environment_lock_released") return "success";
+  if (type === "deploy_started" || type === "canary_advanced" || type === "canary_analysis_sampled" || type === "canary_resumed") return "active";
   return "neutral";
 }
 
 function releaseEventIcon(type: ReleaseEventType): ReactNode {
   if (type === "deploy_failed") return <XCircle size={15} />;
-  if (type === "release_rolled_back") return <RotateCcw size={15} />;
+  if (type === "release_rolled_back" || type === "canary_auto_rolled_back") return <RotateCcw size={15} />;
   if (type === "canary_paused") return <PauseCircle size={15} />;
-  if (type === "deploy_succeeded" || type === "canary_promoted" || type === "environment_lock_released") {
+  if (type === "deploy_succeeded" || type === "canary_promoted" || type === "canary_auto_promoted" || type === "environment_lock_released") {
     return <CheckCircle2 size={15} />;
   }
-  if (type === "deploy_started" || type === "canary_advanced" || type === "canary_resumed") return <Clock3 size={15} />;
+  if (type === "deploy_started" || type === "canary_advanced" || type === "canary_analysis_sampled" || type === "canary_resumed") return <Clock3 size={15} />;
   return <CircleDot size={15} />;
 }
 
