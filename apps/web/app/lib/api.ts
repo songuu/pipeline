@@ -1,5 +1,7 @@
 import type {
   ApiResponse,
+  DoraMetrics,
+  EnvironmentType,
   TektonBridgeCapabilities,
   TektonPreflightReport,
   TektonPreflightRequest,
@@ -71,6 +73,24 @@ export const runTektonPreflight = (
 
 export const fetchRunEvents = (runId: string, options: RequestOptions = {}): Promise<StoredRunEvent[]> =>
   apiFetch<StoredRunEvent[]>(`/api/runs/${runId}/events`, options);
+
+export interface DoraQueryParams {
+  window?: number;
+  environment?: EnvironmentType;
+  applicationId?: string;
+}
+
+export const fetchDoraMetrics = (
+  query: DoraQueryParams = {},
+  options: RequestOptions = {},
+): Promise<DoraMetrics> => {
+  const params = new URLSearchParams();
+  if (query.window) params.set("window", String(query.window));
+  if (query.environment) params.set("environment", query.environment);
+  if (query.applicationId) params.set("applicationId", query.applicationId);
+  const search = params.toString();
+  return apiFetch<DoraMetrics>(`/api/metrics/dora${search ? `?${search}` : ""}`, options);
+};
 
 export const fetchTektonTaskRunDetail = (
   runId: string,

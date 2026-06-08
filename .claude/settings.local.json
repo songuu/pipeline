@@ -60,7 +60,15 @@
       "Bash(pnpm --filter @deploy-management/web add -D vitest)",
       "Bash(pnpm --filter @deploy-management/web test)",
       "Bash(grep -n \"^//go:build\\\\|^// +build\" services/tekton-bridge/internal/backend/tekton.go)",
-      "Bash(pnpm --filter @deploy-management/api test)"
+      "Bash(pnpm --filter @deploy-management/api test)",
+      "Bash(git *)",
+      "Bash(ssh *)",
+      "WebFetch(domain:www.harness.io)",
+      "WebFetch(domain:developer.harness.io)",
+      "Bash(ls \"C:\\\\project\\\\company\\\\deploy-management\\\\apps\\\\api\\\\src\\\\verification\")",
+      "Bash(ls \"C:\\\\project\\\\company\\\\deploy-management\\\\apps\\\\api\\\\src\\\\metrics\")",
+      "Bash(ls \"C:\\\\project\\\\company\\\\deploy-management\\\\apps\\\\api\\\\src\\\\notifications\")",
+      "PowerShell(pnpm *)"
     ]
   }
 }

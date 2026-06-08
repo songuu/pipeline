@@ -8,6 +8,7 @@ import { EnvironmentsModule } from "./environments/environments.module";
 import { ExecutorsModule } from "./executors/executors.module";
 import { KubernetesModule } from "./kubernetes/kubernetes.module";
 import { LifecycleModule } from "./lifecycle/lifecycle.module";
+import { MetricsModule } from "./metrics/metrics.module";
 import { PipelineLayoutsModule } from "./pipeline-layouts/pipeline-layouts.module";
 import { PipelinesModule } from "./pipelines/pipelines.module";
 import { ReleasesModule } from "./releases/releases.module";
@@ -23,6 +24,7 @@ import { VerificationModule } from "./verification/verification.module";
     ExecutorsModule,
     KubernetesModule,
     LifecycleModule,
+    MetricsModule,
     ApplicationsModule,
     ApprovalsModule,
     ArtifactsModule,

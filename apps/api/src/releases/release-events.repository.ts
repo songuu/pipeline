@@ -29,6 +29,21 @@ export class ReleaseEventsRepository extends InMemoryRepository<ReleaseEvent> {
       .sort((left, right) => left.sequence - right.sequence);
   }
 
+  /**
+   * 全量事件视图（跨 release），供 DORA 等聚合只读消费。
+   * 按 createdAt 升序，同刻以 sequence 兜底，保证确定性顺序。
+   */
+  listAll(): ReleaseEvent[] {
+    return this.snapshot().sort((left, right) => {
+      const byTime = left.createdAt.localeCompare(right.createdAt);
+      return byTime !== 0 ? byTime : left.sequence - right.sequence;
+    });
+  }
+
+  listByApplication(applicationId: string): ReleaseEvent[] {
+    return this.listAll().filter((event) => event.applicationId === applicationId);
+  }
+
   async append(input: AppendReleaseEventInput): Promise<ReleaseEvent> {
     const event: ReleaseEvent = {
       ...input,

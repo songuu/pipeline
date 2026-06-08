@@ -325,3 +325,84 @@ P2  第 4 节 审批通知 / 第 5 节 模板（增量增强，按需）
 | `pnpm --filter @deploy-management/shared test` | pass，27 tests |
 | `pnpm --filter @deploy-management/api test` | pass，58 tests |
 | `pnpm --filter @deploy-management/web test` | pass，29 tests |
+
+---
+
+## 10. 2026-06-08 全产品面重审（delta · 已核对当前真实代码）
+
+> 第二轮对标：不再局限 CD 交集，**12 个 Harness 产品模块全面 web 调研 + 逐条比当前源码**（非 06-05 旧记忆）。
+> 核心变化：旧分析判的"唯一真功能差距 = CV"**基座已闭合**；最高 ROI 借鉴点重排为 DORA + 出站通知 + CV 精修。
+
+### 10.1 已闭合（旧差距，勿再当缺口）
+
+| 能力 | 代码证据 |
+|------|----------|
+| CV 抽象 + 4 provider | `verification/` 真实存在；`simulated/prometheus/http-probe` 真采样（prometheus 真查 `/api/v1/query`）；`aliyun-cms` 仍占位永远返回 unknown |
+| 周期采样调度 | `canary-watcher.service.ts:23` `setInterval+timer.unref()`（刻意不引 `@nestjs/schedule`，确认 0 命中），已挂 `app.module.ts:40` |
+| 自动回滚闭环 | `canary-watcher.service.ts:82` `enabled` 时真调 `rollbackRelease`（:496 重部署稳定制品+流量归零+释放锁+审计） |
+| observe-only 安全门 | `canary-watcher.service.ts:192` `CANARY_AUTO_ACTION`，默认只采样不开火 |
+| baseline-vs-canary | `applyBaselineComparison:112`（**仅 successRate 单维**，errorRate/p95 仍走绝对阈值 → 见 10.2 #4） |
+| DORA 数据源 | `release-events.repository` append-only + 单调 sequence + 15 种事件，四指标输入字段齐备（**缺聚合层**，`apps/api/src/metrics` 确认不存在） |
+
+### 10.2 可直接借鉴清单（排序 · 已代入单机/无 k8s/imperative-push/云效约束）
+
+| # | 借鉴项 | ROI | 工作量 | 落点 |
+|---|--------|-----|--------|------|
+| 1 | **DORA 四指标聚合层** | high | M | 新增 `apps/api/src/metrics/dora.service.ts`+`dora.controller.ts` 双路由(`/api/metrics/dora`+`/oapi/v1/flow/metrics/dora`，viewer)；先给 `ReleaseEventsRepository` 加 `listAll/byApplication` 视图避免 N+1。频率=count(deploy_succeeded)/窗口；前置时间=artifact.uploadedAt→deploy_succeeded 中位数；失败率=(deploy_failed+rolled_back)/总；MTTR=rolled_back→下个 deploy_succeeded |
+| 2 | **出站通知（钉钉/企微群机器人 webhook）** | high | S | 新增 `apps/api/src/notifications/notification.service.ts`，挂 `approvals.service.ts:32 createForRun` + `releases` 的 `deploy_failed/rolled_back`。全 `apps/api/src` 零出站通知。URL 走 `secret-resolver` 不硬编码；失败 try-catch 吞掉不阻断主流程。国内宜钉钉/企微非 Slack |
+| 3 | **Pin-as-Baseline + 敏感度三档** | medium | S | `CanaryRolloutPolicy` 加 `sensitivity?:'high'\|'medium'\|'low'`+`pinnedBaselineReleaseId?`；`canary-watcher:131` tolerance 由单值改按 sensitivity 映射倍数；`resolveBaseline:667` 优先取 pinned。当前基线随每次发布漂移，固定已知良好版本是 ML CV 务实平替。新增 `POST .../releases/:id/pin-baseline` 双路由(member) |
+| 4 | **baseline 扩三维**（errorRate/p95 也比基线） | medium | S | `applyBaselineComparison:112` 当前只比 successRate；`CanaryAnalysisSnapshot` 字段已有。注意反向越界：`candidate.errorRate > baseline.errorRate + tolerance` 才降级。**与 #3 同文件一次 PR 做完** |
+| 5 | **AuditEvent 增强**（+result/sourceIp/diff） | medium | S | 现仅 actor/action/target/createdAt（`audit.service.ts:14`）。`webhook-deliveries.repository` 已采 sourceIp 可复用模式。改 `record` 签名是破坏性，~50 调用点给默认值兼容；双路由一起改 |
+| 6 | **部署漂移探测**（observe-only 单机退化版） | medium | M | 复用 `canary-watcher` `setInterval` + `http-probe` provider 比对真实版本 vs `environments` 记录 currentDigest，不一致写 `environment_drift_detected`。**非 GitOps**，默认不自动 reconcile；新事件枚举需 TS↔Go 同步 |
+| 7 | **本机依赖缓存接线**（CI Cache 单机版） | high | M | `PipelineCacheConfig` 基座在但 `local-docker.executor` 没读，每次 `pnpm install --frozen-lockfile` 全量。指向固定 `LOCAL_DOCKER_CACHE_DIR` 的 `pnpm --store-dir`/`go env -w GOMODCACHE`。对 1.8GB 机器价值高，须设容量上限+保守失效 |
+| 8 | **审批人名单 allowedApprovers** | medium | S | 现谁点谁是 actor（`approvals.service.ts:36 decide`）无限定。`ApprovalRequest` 加 `allowedApprovers?:string[]`，decide 校验 principal 在名单内；为空退化兼容。与 #2 配合成完整审批闭环 |
+
+**附带 1h 小修**：`EnvironmentLock.expiresAt` 字段在但 `status='expired'` 从不被设置 → 崩溃残留死锁。挂进 `canary-watcher` 已有 `setInterval` 顺手清理。
+
+### 10.3 仍开放但靠后（remaining）
+
+- `aliyun-cms` provider 仍占位 → 若主用阿里云监控，接 CMS OpenAPI 签名客户端是 CV 真实指标源最高 ROI 一笔（effort M-L），但 prometheus/http-probe 已可用、不阻塞 enabled 切换。
+- Pipeline 级可复用模板/VariableSet（`pipelines.service.ts` 确认 absent）—— 小团队当前流水线数量未必值得，等重复痛点明显再做。
+- applications 只读（仅 GET 双路由）缺 create/update —— IDP 软件目录最低成本一步，优先级低于 metrics。
+- SLO/error-budget 轻量版（部署成功率 SLO）—— 与 DORA 共用事件源，DORA 之后合并扩展；request-based SLO skip（无稳定请求指标流）。
+- 失败根因规则版摘要（对 `run-events` failed stage 抽 command/log 匹配 OOM/pnpm-sharp/go-PATH/ff-only 已知坑）—— 不接 LLM 的规则版可先做。
+- 轻量安全扫描（gitleaks + osv/govulncheck）接 `local-docker` test 阶段，结果落 Finding artifact，只扫不自动 PR。
+- SBOM 真实生成（syft 单二进制）替换 snapshot 展示占位 —— 优先级低于 DORA/通知/CV 完善。
+
+### 10.4 明确不做（补充 06-05 第 6 节 · 单机硬冲突）
+
+| Harness 能力 | 不做原因 |
+|------|------|
+| 真 Blue-Green/Rolling | 单机 1.8GB 跑不起双生产环境+无 LB；`blue_green`/`rolling` 服务层是 stub（`releases.service.ts:1103`）退化为全量直发，回切已被 `rollbackRelease` 覆盖 → 文档标注或删枚举 |
+| GitOps pull / Argo / Delegate / K8s Orchestrator / Karpenter | 无 k8s（k3s disable），push 非 pull，Delegate 三前提(SaaS控制面+跨网执行+多副本HA)全不成立 |
+| OPA/Rego/Cloud Custodian 策略引擎 | 对单机重依赖；现有硬编码治理(RBAC+sourcePolicy allowlist+审批+环境锁)对单租户已够；要可配置用轻量 zod/TS 谓词不引 Rego runtime |
+| CCM 全套(Perspectives/AutoStopping/Commitment/Budgets/rightsizing) | 单台固定 ECS 无云账单 OpenAPI、无弹性资源可停起；本项目方向是升配不是省钱（与 FinOps 缩容相反） |
+| 混沌全套(LitmusChaos/Resilience Score/ChaosHub/GameDay) | 需 k8s operator；单机自压测拖垮唯一生产实例 OOM；唯一可借的"声明阈值→采样→机判→observe-only→自动动作"范式已在 CV 落地 |
+| Feature Flags 运行时评估引擎/targeting/SDK | 求值需在被部署业务应用运行时，本控制面不在请求链路；真需要接开源 Unleash 不自写 |
+| IaCM 多引擎/State/Module Registry/成本预估 | 部署制品到已存在单机，不声明/供给云资源，无 .tf/state 概念，纯 YAGNI |
+| Database DevOps(Schema/迁移编排/AI 迁移) | 无 DB 变更场景；有则用应用自带 ORM migration 在 deploy 阶段跑 |
+| CI Test Intelligence/Build Intelligence/用例级并行 | TI 需 instrument agent 常驻回本太慢；栈是 pnpm/go 无 Gradle/Bazel cache 协议；2 vCPU 无横向并行空间；非 GitHub 生态无 GH Actions 资产 |
+| STO/SCS 高级项(可达性/EPSS/AI 修复 PR/keyless cosign+Rekor/SLSA L3/跨工具去重) | 自研引擎护城河自建不现实；SLSA L3 需隔离托管构建(单机 build+签名同机达不到)；keyless 需 OIDC 身份源(自托管拿不到)；单引擎下去重降噪无意义 |
+| AI 重型(DevOps Agent NL→YAML/AI Test 浏览器集群/Knowledge Graph 图库/Dashboard Intelligence) | 1.8GB 跑不动本地推理/向量库；接外部 LLM 属付费跨用户副作用(auto-mode 强制人工)。若未来接 LLM 统一"用户自带 Key+env 注入+不落库+推理后即弃"，不自动改 YAML/开 PR |
+| 细粒度 RBAC 矩阵/Account-Org-Project 多作用域/ABAC/Resource Group | 单租户单团队，三级 rank(viewer/member/admin)+各 service 归属校验已恰当；多作用域是多租户 SaaS 治理结构 |
+| Composite SLO/SRM 统计显著性(SAX/ML/SII 节点归因)/日志聚类 | 单机无多节点(SII 不存在，基线改用时间维度)；无大流量样本(显著性统计不成立)；无日志聚合管道，run-events log 是 CI 构建日志非 runtime 错误流 |
+| MCP Server/Multi-Service 编排/环境向前传播/IDP Scaffolder/TechDocs/Environment Blueprints | 多服务级联是大组织诉求(本项目单 deploy stage)；脚手架建库对单团队低频；文档放 README。MCP 只读暴露 ROI 不低但碰生产路径，列可选后置非必做 |
+
+### 10.5 落地顺序（与已落 P0 CV 衔接、复用 setInterval 调度）
+
+```
+阶段一(零风险高信号·互不依赖可并行):
+  #1 DORA 聚合层（先加 ReleaseEventsRepository.listAll 视图——SLO/scorecard/变更归因共同底座）
+  #2 出站通知（独立 notification.service，挂 approvals + deploy_failed/rolled_back）
+阶段二(CV 精修·同文件一次做完):
+  #3 Pin-as-Baseline+sensitivity 与 #4 baseline 三维 合并（改 shared CanaryRolloutPolicy + canary-watcher:112 + resolveBaseline:667）
+  ↳ 并行小修: EnvironmentLock 过期清理（复用 canary-watcher setInterval）
+  ↳ 做完后才有资格在指标源可信(prometheus 接好或 aliyun-cms 落地)后把 CANARY_AUTO_ACTION 切 enabled
+阶段三(治理增量):
+  #5 AuditEvent 增强（破坏性接口变更，~50 调用点单独排期）→ #8 审批人名单
+阶段四(按实际痛点启动):
+  #7 本机依赖缓存接线（改 local-docker.executor，谨慎做失效+磁盘上限）
+  #6 漂移探测（依赖 release endpoint 可探测，排最后）
+```
+
+> 关键依赖链：DORA 的 `listAll` 视图是 SLO/scorecard 前置；`canary-watcher` 的 `setInterval` 是 EnvironmentLock 过期清理/DriftWatcher/未来 ScheduledTrigger 的共享调度基座（全项目刻意不引 `@nestjs/schedule`，新定时任务一律复用此模式）；`aliyun-cms` provider 落地是 CV 在阿里云生态真正可信的前提，但不阻塞 enabled 切换。

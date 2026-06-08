@@ -31,6 +31,8 @@ import { ArtifactsService } from "../artifacts/artifacts.service";
 import { AuditService } from "../audit/audit.service";
 import { createStableId } from "../common/ids";
 import { EnvironmentsService } from "../environments/environments.service";
+import { buildReleaseFailureMessage } from "../notifications/notification-messages";
+import { NotificationService } from "../notifications/notification.service";
 import { RunsService } from "../runs/runs.service";
 import { ReleaseEventsRepository } from "./release-events.repository";
 import { ReleaseExecutionsRepository } from "./release-executions.repository";
@@ -60,7 +62,21 @@ export class ReleasesService {
     @Inject(RunsService) private readonly runs: RunsService,
     @Inject(EnvironmentsService) private readonly environments: EnvironmentsService,
     @Inject(AuditService) private readonly audit: AuditService,
+    @Inject(NotificationService) private readonly notifications: NotificationService,
   ) {}
+
+  /** 旁路通知：dispatch 自身不抛错，仍兜底 catch，确保发布主流程绝不被通知拖累。 */
+  private async notifyFailure(
+    release: ReleaseDeployment,
+    eventType: "deploy_failed" | "release_rolled_back",
+    detail: string,
+  ): Promise<void> {
+    try {
+      await this.notifications.dispatch(buildReleaseFailureMessage(release, eventType, detail));
+    } catch {
+      // 通知失败不影响发布/回滚结果
+    }
+  }
 
   list(): ReleaseDeployment[] {
     return this.repo.snapshot();
@@ -343,6 +359,7 @@ export class ReleasesService {
       await this.recordReleaseEvent(release, "deploy_failed", `上线失败：${message}`, {
         error: message,
       });
+      await this.notifyFailure(release, "deploy_failed", `上线失败：${message}`);
       await this.recordReleaseEvent(release, "environment_lock_released", "上线失败，环境锁已释放。", {
         lockId: lock.id,
         reason: "deploy_failed",
@@ -544,6 +561,7 @@ export class ReleasesService {
       stableImageRef: stableRelease.imageRef,
       rollbackTraffic: trafficSnapshot(0, updated.currentRegionTraffic, request.actor ?? "RO"),
     }, request.actor);
+    await this.notifyFailure(updated, "release_rolled_back", `发布已回滚到稳定版本 ${stableRelease.imageRef}：${request.reason ?? "人工回滚"}`);
     await this.recordReleaseEvent(updated, "environment_lock_released", "回滚完成，环境锁已释放。", {
       reason: "release_rolled_back",
     }, request.actor);

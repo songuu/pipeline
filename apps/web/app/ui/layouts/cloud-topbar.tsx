@@ -1,6 +1,7 @@
 "use client";
 
-import { Archive, CheckCircle2, ChevronDown, KeyRound, ListChecks, Plus } from "lucide-react";
+import Link from "next/link";
+import { Archive, BarChart3, CheckCircle2, ChevronDown, KeyRound, ListChecks, Plus } from "lucide-react";
 
 interface CloudTopbarProps {
   onCreate: () => void;
@@ -38,6 +39,9 @@ export function CloudTopbar({ onCreate, onAction, onOpenList }: CloudTopbarProps
         </button>
       </div>
       <div className="cloud-actions">
+        <Link className="plain-icon" href="/metrics" aria-label="DORA 部署度量" title="DORA 部署度量">
+          <BarChart3 size={15} />
+        </Link>
         <button className="round-blue" aria-label="新增" onClick={onCreate}>
           <Plus size={15} />
         </button>

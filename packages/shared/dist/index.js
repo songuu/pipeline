@@ -18,6 +18,8 @@ __exportStar(require("./platform"), exports);
 __exportStar(require("./source"), exports);
 __exportStar(require("./registry"), exports);
 __exportStar(require("./release"), exports);
+__exportStar(require("./metrics"), exports);
+__exportStar(require("./notifications"), exports);
 __exportStar(require("./tekton"), exports);
 __exportStar(require("./yunxiao"), exports);
 __exportStar(require("./api"), exports);
