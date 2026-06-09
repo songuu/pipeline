@@ -23,6 +23,15 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# ⚠ 已弃用：此脚本走旧的"本地构建直发"路径，与离机 CI 流水线已漂移——
+#   - 绕过 scripts/lib/release-common.sh 的原子激活 / 健康门 / 自动回滚；
+#   - 用 next start 而非 standalone；强制 go build bridge（prod 已停）；
+#   - 把 .env（含密钥）打包并 scp 上传。
+# 请改用：
+#   pnpm deploy         触发 GitHub Actions 离机构建+部署（推荐，盒子不构建）
+#   pnpm deploy:local   本地兜底直发，复用 CI 同套原子激活/健康门/回滚（scripts/release.sh）
+Write-Warning "deploy-prod.ps1 已弃用：请改用 'pnpm deploy'（触发 CI 离机构建）或 'pnpm deploy:local'（本地兜底，复用原子激活+健康门+回滚）。此脚本仍走旧的本地构建直发，绕过健康门/自动回滚且会上传 .env。"
+
 function Write-Step {
   param([string]$Message)
   Write-Host ""

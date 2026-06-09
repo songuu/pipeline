@@ -13,3 +13,7 @@ apps/api/dist
 next-env.d.ts
 *.log
 .handoff/
+# 本地发版 staging 目录（deploy:local / deploy-prod.ps1 的临时构建产物）
+.codex-tmp/
+# 本地发版连接配置（含 SSH host/user，绝不入库；模板见 scripts/release.env.example）
+/scripts/.release.env
