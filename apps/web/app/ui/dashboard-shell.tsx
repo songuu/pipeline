@@ -376,7 +376,7 @@ export function DashboardShell({ surface, pipelineId, runId }: DashboardShellPro
                   }}
                   onSelectPipeline={goToPipeline}
                   onSelectRun={(runId) => goToRun(runId)}
-                  onRunPipeline={(pipeline) => openRunDialog(pipeline)}
+                  onRunPipeline={(pipeline) => void runPipeline(pipeline)}
                   onEditPipeline={(pipeline) => router.push(`/pipelines/${pipeline.id}/edit`)}
                   onCopy={copyValue}
                   onNotify={notify}
@@ -401,7 +401,7 @@ export function DashboardShell({ surface, pipelineId, runId }: DashboardShellPro
                 router.push(`/pipelines/${selectedPipeline.id}/edit`);
               }}
               onBack={() => router.push("/pipelines")}
-              onRun={() => openRunDialog(selectedPipeline)}
+              onRun={() => void runPipeline(selectedPipeline)}
               onSelectRun={(id) => goToRun(id)}
               onCancel={handleCancel}
               onPromote={handlePromote}

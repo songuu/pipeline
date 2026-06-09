@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Inject, Injectable, NotFoundException, type OnModuleInit } from "@nestjs/common";
 import {
   DEFAULT_PIPELINE_BUILD_CONFIG,
   type Application,
@@ -30,7 +30,7 @@ import { RunsRepository } from "./runs.repository";
 import type { TriggerRunDto } from "./dto/trigger-run.dto";
 
 @Injectable()
-export class RunsService {
+export class RunsService implements OnModuleInit {
   private readonly liveTimers = new Map<string, Array<ReturnType<typeof setTimeout>>>();
   private readonly runHandles = new Map<string, RunHandle>();
 
@@ -45,6 +45,29 @@ export class RunsService {
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(RunEventsRepository) private readonly runEvents: RunEventsRepository,
   ) {}
+
+  async onModuleInit(): Promise<void> {
+    const restoredRuns = await this.repo.list();
+    for (const run of restoredRuns) {
+      if (run.status === "waiting_approval") {
+        await this.ensureApproval(run);
+        continue;
+      }
+      if (!isLiveRun(run)) continue;
+
+      if (run.executor && run.executor.backend !== "local-docker") {
+        this.runHandles.set(run.id, run.executor);
+        void this.consumeExecutorEvents(run, run.executor);
+        void this.syncExecutorRun(run, run.executor);
+        continue;
+      }
+
+      await this.failExecutorRun(
+        run,
+        "运行恢复失败: local-docker 执行器状态丢失，请重新触发流水线。",
+      );
+    }
+  }
 
   list(): PipelineRun[] {
     return this.repo.snapshot();
@@ -167,6 +190,7 @@ export class RunsService {
       await this.lifecycle.cancelExecutor(handle).catch(() => undefined);
     }
     this.lifecycle.cancel(run);
+    await this.persistRun(run);
     await this.audit.record(run.actor, "cancel_run", run.id);
     return run;
   }
@@ -175,6 +199,7 @@ export class RunsService {
     const run = this.get(runId);
     this.clearRunTimers(runId);
     this.lifecycle.completePromotion(run);
+    await this.persistRun(run);
     await this.artifacts.upsertFromRun(run, "provenance");
     await this.audit.record("system", "promote_run", run.id);
     return run;
@@ -194,6 +219,7 @@ export class RunsService {
     const approval = await this.approvals.decide(approvalId, decision, actor);
     const run = this.get(approval.runId);
     this.lifecycle.markApproval(run, decision === "approved", actor);
+    await this.persistRun(run);
     if (decision === "approved") {
       await this.artifacts.upsertFromRun(run, "provenance");
     }
@@ -405,10 +431,11 @@ export class RunsService {
     try {
       const handle = await this.lifecycle.startExecutor(run);
       this.runHandles.set(run.id, handle);
+      await this.persistRun(run);
       void this.consumeExecutorEvents(run, handle);
       await this.syncExecutorRun(run, handle);
     } catch (error) {
-      this.failExecutorRun(run, `执行器启动失败: ${describeError(error)}`);
+      await this.failExecutorRun(run, `执行器启动失败: ${describeError(error)}`);
     }
   }
 
@@ -418,6 +445,7 @@ export class RunsService {
       const status = await this.lifecycle.executorStatus(handle);
       await this.runEvents.recordStatusSnapshot(handle, status);
       this.lifecycle.syncExecutorStatus(run, status);
+      await this.persistRun(run);
       await this.upsertCompletedStageArtifacts(run);
 
       if (run.status === "waiting_approval") {
@@ -439,7 +467,7 @@ export class RunsService {
         return;
       }
     } catch (error) {
-      this.failExecutorRun(run, `执行器状态同步失败: ${describeError(error)}`);
+      await this.failExecutorRun(run, `执行器状态同步失败: ${describeError(error)}`);
       return;
     }
 
@@ -478,7 +506,7 @@ export class RunsService {
     }
   }
 
-  private failExecutorRun(run: PipelineRun, message: string): void {
+  private async failExecutorRun(run: PipelineRun, message: string): Promise<void> {
     const stage =
       run.stages.find((item) => item.status === "running") ??
       run.stages.find((item) => item.status === "pending") ??
@@ -490,6 +518,7 @@ export class RunsService {
       run.updatedAt = new Date().toISOString();
     }
     this.clearRunTimers(run.id);
+    await this.persistRun(run);
   }
 
   private isTerminal(run: PipelineRun): boolean {
@@ -505,6 +534,10 @@ export class RunsService {
     timers.forEach((timer) => clearTimeout(timer));
     this.liveTimers.delete(runId);
   }
+
+  private async persistRun(run: PipelineRun): Promise<void> {
+    await this.repo.update(run.id, run);
+  }
 }
 
 function describeError(error: unknown): string {
@@ -517,6 +550,10 @@ function hasLocalRegistryPassword(): boolean {
 
 function pipelineRequiresRealArtifacts(pipeline: PipelineDefinition): boolean {
   return pipeline.stages.includes("build") || pipeline.stages.includes("upload");
+}
+
+function isLiveRun(run: PipelineRun): boolean {
+  return run.status === "queued" || run.status === "running";
 }
 
 function matchesAnyPattern(value: string, patterns: string[]): boolean {
