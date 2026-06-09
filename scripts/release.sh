@@ -31,6 +31,20 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
+# WSL 守卫：在 Windows 上，pnpm 经 cmd.exe 解析 `bash` 时 System32\bash.exe（WSL 启动器）会先命中，
+# 把脚本丢进 WSL 跑——那里的 ssh/gh/node 环境与开发机不一致，发版会以诡异方式失败。
+# 正常入口是 scripts/release.mjs（设了 RELEASE_LAUNCHER=node 并显式定位 Git Bash）。
+# 仅当“非启动器调用”且“运行在 WSL 内核”时硬性拦截；RELEASE_ALLOW_WSL=1 可强制放行（真在 WSL 里开发的人）。
+if [ "${RELEASE_LAUNCHER:-}" != "node" ] && [ "${RELEASE_ALLOW_WSL:-0}" != "1" ]; then
+  case "$(uname -r 2>/dev/null)" in
+    *[Mm]icrosoft* | *WSL*)
+      echo "ERROR: 检测到运行在 WSL bash 下。请用 'pnpm deploy*'（经 Node 启动器定位 Git Bash），" >&2
+      echo "       或直接用 Git Bash 执行；确需在 WSL 内运行请设 RELEASE_ALLOW_WSL=1。" >&2
+      exit 1
+      ;;
+  esac
+fi
+
 # 可选本地连接配置（gitignore；放 SSH host/user 等，避免硬编码进入跟踪源码）。
 if [ -f "$REPO_ROOT/scripts/.release.env" ]; then
   # shellcheck disable=SC1091
@@ -74,18 +88,30 @@ ssh_target() { printf '%s@%s' "$DEPLOY_USER" "$DEPLOY_HOST"; }
 # 构造 ssh/scp 选项数组（端口、可选私钥）。scp 端口用大写 -P。
 # WHY 末尾显式 return 0：末行 `[ test ] && cmd` 在 test 为假（端口=22/无私钥）时返回非0，
 # 作为函数最后命令会让函数返回非0，set -e 下直接拖垮调用方（静默退出）。同 set -e 不可逆点那族坑。
+# WHY nameref 用罕见名 __ssh_opts_ref：bash 的 local -n 若与调用方传入的变量同名会触发
+# "circular name reference" 并静默得到空数组。调用方都传 sopts/copts，故内部用独特名规避。
 ssh_opts() {
-  local -n _out="$1"
-  _out=()
-  [ "$DEPLOY_PORT" != "22" ] && _out+=(-p "$DEPLOY_PORT")
-  [ -n "${DEPLOY_IDENTITY:-}" ] && _out+=(-i "$DEPLOY_IDENTITY")
+  local -n __ssh_opts_ref="$1"
+  __ssh_opts_ref=()
+  [ "$DEPLOY_PORT" != "22" ] && __ssh_opts_ref+=(-p "$DEPLOY_PORT")
+  [ -n "${DEPLOY_IDENTITY:-}" ] && __ssh_opts_ref+=(-i "$DEPLOY_IDENTITY")
   return 0
 }
 scp_opts() {
-  local -n _out="$1"
-  _out=()
-  [ "$DEPLOY_PORT" != "22" ] && _out+=(-P "$DEPLOY_PORT")
-  [ -n "${DEPLOY_IDENTITY:-}" ] && _out+=(-i "$DEPLOY_IDENTITY")
+  local -n __scp_opts_ref="$1"
+  __scp_opts_ref=()
+  [ "$DEPLOY_PORT" != "22" ] && __scp_opts_ref+=(-P "$DEPLOY_PORT")
+  [ -n "${DEPLOY_IDENTITY:-}" ] && __scp_opts_ref+=(-i "$DEPLOY_IDENTITY")
+  return 0
+}
+
+# gh 仓库锚定：gh 在非仓库 cwd / 多 remote 时会猜错目标仓库。统一从 origin 解析并 --repo 钉死。
+# 解析失败留空，gh_repo_args 退化为不加 --repo（gh 自行推断），不致命。
+GH_REPO="$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null || echo '')"
+gh_repo_args() {
+  local -n __gh_repo_ref="$1"
+  __gh_repo_ref=()
+  [ -n "$GH_REPO" ] && __gh_repo_ref=(--repo "$GH_REPO")
   return 0
 }
 
@@ -95,18 +121,31 @@ cmd_ci() {
   need git
   gh auth status >/dev/null 2>&1 || die "gh 未登录，先运行 gh auth login。"
 
+  local repo_args
+  gh_repo_args repo_args
+
   # 关键 UX：CI 构建的是 GitHub 上 origin/$DEPLOY_BRANCH 的代码，不是你本地工作区。
   # 本地有未提交改动 / 本地 HEAD 落后或领先远端时必须显式告警，否则会误以为"发了本地改动"。
-  git -C "$REPO_ROOT" fetch --quiet origin "$DEPLOY_BRANCH" 2>/dev/null || true
+  # fetch 成功与否要区分：失败时不能假装拿到了最新远端，否则下方 SHA 判断基于陈旧缓存会误导。
+  local fetch_ok=1
+  git -C "$REPO_ROOT" fetch --quiet origin "$DEPLOY_BRANCH" 2>/dev/null || fetch_ok=0
+
   local local_sha remote_sha dirty
   local_sha="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
   remote_sha="$(git -C "$REPO_ROOT" rev-parse "origin/$DEPLOY_BRANCH" 2>/dev/null || echo '')"
   dirty="$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null || true)"
 
+  if [ "$fetch_ok" = 0 ]; then
+    echo "WARN: git fetch origin $DEPLOY_BRANCH 失败（离线/凭据/网络？）。以下基于本地缓存的远端引用，可能已过期。"
+  fi
   if [ -n "$remote_sha" ]; then
-    echo "==> CI 将构建 origin/$DEPLOY_BRANCH @ ${remote_sha:0:12}"
+    local staleness=""
+    [ "$fetch_ok" = 0 ] && staleness="（缓存，未必最新）"
+    echo "==> CI 将构建 origin/$DEPLOY_BRANCH @ ${remote_sha:0:12}$staleness"
+  elif [ "$fetch_ok" = 0 ]; then
+    echo "WARN: 无法解析 origin/$DEPLOY_BRANCH 且 fetch 失败——无法确认远端状态。"
   else
-    echo "WARN: 无法解析 origin/$DEPLOY_BRANCH，请确认已 push。"
+    echo "WARN: 无法解析 origin/$DEPLOY_BRANCH。该分支可能从未 push，请先 git push -u origin $DEPLOY_BRANCH（或确认分支名拼写）。"
   fi
   if [ -n "$dirty" ]; then
     echo "WARN: 本地有未提交改动 —— 不会进入 CI 构建（CI 只构建已 push 到远端的提交）。"
@@ -117,20 +156,23 @@ cmd_ci() {
 
   confirm "确认触发 CI 离机构建+部署（$DEPLOY_BRANCH）？" || { echo "已取消。"; return 0; }
 
-  local before after rid i
-  before="$(gh run list --workflow "$DEPLOY_WORKFLOW" -L 1 --json databaseId -q '.[0].databaseId' 2>/dev/null || echo '')"
-
   if [ "$DRY_RUN" = 1 ]; then
     echo "[dry-run] gh workflow run $DEPLOY_WORKFLOW --ref $DEPLOY_BRANCH"
     return 0
   fi
-  gh workflow run "$DEPLOY_WORKFLOW" --ref "$DEPLOY_BRANCH"
 
-  # gh workflow run 不返回 run id；轮询直到 list 顶部出现一个新 id（避免 watch 错上一次的 run）。
+  # run-id 捕获只看 workflow_dispatch 事件的 run，避免把别人/CI 同时 push 触发的 run 误当成本次。
+  local before after rid i
+  before="$(gh run list "${repo_args[@]}" --workflow "$DEPLOY_WORKFLOW" --event workflow_dispatch -L 1 --json databaseId -q '.[0].databaseId' 2>/dev/null || echo '')"
+
+  gh workflow run "${repo_args[@]}" "$DEPLOY_WORKFLOW" --ref "$DEPLOY_BRANCH" \
+    || die "触发 workflow 失败：确认 $DEPLOY_WORKFLOW 已启用、分支已 push，且 gh token 含 workflow 权限（gh auth refresh -s workflow）。"
+
+  # gh workflow run 不返回 run id；轮询直到 dispatch 列表顶部出现一个新 id（避免 watch 错上一次的 run）。
   echo "==> 已触发，等待新 run 出现..."
   for i in $(seq 1 20); do
     sleep 3
-    after="$(gh run list --workflow "$DEPLOY_WORKFLOW" -L 1 --json databaseId -q '.[0].databaseId' 2>/dev/null || echo '')"
+    after="$(gh run list "${repo_args[@]}" --workflow "$DEPLOY_WORKFLOW" --event workflow_dispatch -L 1 --json databaseId -q '.[0].databaseId' 2>/dev/null || echo '')"
     if [ -n "$after" ] && [ "$after" != "$before" ]; then
       rid="$after"
       break
@@ -138,11 +180,11 @@ cmd_ci() {
   done
   if [ -z "${rid:-}" ]; then
     echo "WARN: 未捕获到新 run（可能尚未排队）。用 'pnpm deploy:watch' 或 gh run list 查看。"
-    gh run list --workflow "$DEPLOY_WORKFLOW" -L 3 || true
+    gh run list "${repo_args[@]}" --workflow "$DEPLOY_WORKFLOW" -L 3 || true
     return 0
   fi
   echo "==> watch run $rid（Ctrl-C 仅停止本地 watch，不影响 CI）"
-  gh run watch "$rid" --exit-status || die "CI run 失败（run $rid）。盒子上 CI 会自动健康门+回滚，请用 'pnpm deploy:status' 复核。"
+  gh run watch "${repo_args[@]}" "$rid" --exit-status || die "CI run 失败（run $rid）。盒子上 CI 会自动健康门+回滚，请用 'pnpm deploy:status' 复核。"
   echo "==> CI 发布成功。"
 }
 
@@ -192,18 +234,21 @@ cmd_local() {
 
   # 远端激活：untar -> chmod -> activate-release.sh。镜像 .github/workflows/deploy.yml 的激活块，
   # 真正的原子切换/健康门/自动回滚逻辑全在 activate-release.sh 内（两条路径同源）。
+  # 远端激活用 EXIT trap 兜底清理 incoming tarball：无论激活成功还是中途失败，都不留垃圾
+  # （旧写法把 rm 放在 activate 之后，失败时 tarball 永久残留，反复直发会塞满盒子磁盘）。
   echo "==> ssh 激活（untar -> activate-release.sh）"
-  ssh "${sopts[@]}" "$tgt" "bash -s" <<REMOTE
+  ssh "${sopts[@]}" "$tgt" "bash -s" <<REMOTE || die "盒子激活失败：activate-release.sh 内含原子切换+健康门，失败时已尝试自动回滚到上一份。请用 'pnpm deploy:status' 复核 current 指向与 pm2 状态；本地 bundle 仍在 $tarball。"
 set -euo pipefail
 DEPLOY_ROOT='$DEPLOY_ROOT'
 NAME='$name'
 export DEPLOY_ROOT
+INCOMING="\$DEPLOY_ROOT/releases/incoming/\$NAME.tar.gz"
+trap 'rm -f "\$INCOMING"' EXIT
 REL="\$DEPLOY_ROOT/releases/\$NAME"
 mkdir -p "\$REL"
-tar -xzf "\$DEPLOY_ROOT/releases/incoming/\$NAME.tar.gz" -C "\$REL"
+tar -xzf "\$INCOMING" -C "\$REL"
 find "\$REL/scripts" -name '*.sh' -exec chmod +x {} + 2>/dev/null || true
 bash "\$REL/scripts/activate-release.sh" "\$REL"
-rm -f "\$DEPLOY_ROOT/releases/incoming/\$NAME.tar.gz"
 REMOTE
   echo "==> 兜底发布完成: $name"
 }
@@ -234,7 +279,9 @@ cmd_rollback() {
 cmd_status() {
   echo "== CI 最近运行 =="
   if command -v gh >/dev/null 2>&1; then
-    gh run list --workflow "$DEPLOY_WORKFLOW" -L 5 2>/dev/null || echo "(无法读取 CI 运行列表)"
+    local repo_args
+    gh_repo_args repo_args
+    gh run list "${repo_args[@]}" --workflow "$DEPLOY_WORKFLOW" -L 5 2>/dev/null || echo "(无法读取 CI 运行列表)"
   else
     echo "(未安装 gh)"
   fi
@@ -255,19 +302,25 @@ cmd_status() {
 cmd_logs() {
   require_ssh
   local n="${1:-100}"
+  # 行数必须是纯数字：它会内嵌进远端 shell 命令，校验既防注入也防 pm2 收到垃圾参数。
+  case "$n" in
+    '' | *[!0-9]*) die "logs 行数必须为正整数，收到: '$n'" ;;
+  esac
   local tgt sopts
   tgt="$(ssh_target)"
   ssh_opts sopts
-  ssh "${sopts[@]}" "$tgt" "pm2 logs --lines '$n' --nostream"
+  # 盒子可能没装/没跑 pm2（如服务用别的方式拉起）；先探测再取日志，给清晰提示而非 ssh 报错噪音。
+  ssh "${sopts[@]}" "$tgt" "command -v pm2 >/dev/null 2>&1 || { echo '(pm2 不可用——盒子未安装或不在 PATH)'; exit 0; }; pm2 logs --lines '$n' --nostream"
 }
 
 # ---------- watch：盯最近一次 CI run ----------
 cmd_watch() {
   need gh
-  local rid
-  rid="$(gh run list --workflow "$DEPLOY_WORKFLOW" -L 1 --json databaseId -q '.[0].databaseId' 2>/dev/null || echo '')"
+  local repo_args rid
+  gh_repo_args repo_args
+  rid="$(gh run list "${repo_args[@]}" --workflow "$DEPLOY_WORKFLOW" -L 1 --json databaseId -q '.[0].databaseId' 2>/dev/null || echo '')"
   [ -n "$rid" ] || die "没有可 watch 的 run。"
-  gh run watch "$rid" --exit-status
+  gh run watch "${repo_args[@]}" "$rid" --exit-status
 }
 
 usage() {

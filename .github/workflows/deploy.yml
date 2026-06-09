@@ -107,9 +107,10 @@ jobs:
             NAME="${{ steps.meta.outputs.release_name }}"
             INCOMING="$DEPLOY_ROOT/releases/incoming"
             REL="$DEPLOY_ROOT/releases/$NAME"
+            # EXIT trap 兜底清理 incoming tarball：激活失败时也不残留，避免反复部署塞满盒子磁盘。
+            trap 'rm -f "$INCOMING/$NAME.tar.gz"' EXIT
             mkdir -p "$REL"
             tar -xzf "$INCOMING/$NAME.tar.gz" -C "$REL"
             find "$REL/scripts" -name '*.sh' -exec chmod +x {} + 2>/dev/null || true
             # activate-release.sh 内部：链 env -> pnpm i --prod -> 切 current -> 重载 -> 健康门 -> 失败自动回滚。
             bash "$REL/scripts/activate-release.sh" "$REL"
-            rm -f "$INCOMING/$NAME.tar.gz"
