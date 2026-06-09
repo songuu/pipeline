@@ -1,0 +1,115 @@
+name: deploy
+
+# 离机构建发布：在 GitHub runner（2C/7G）构建，盒子只跑预构建产物。
+# WHY：1.8GB 生产盒子上跑 next build 会 OOM；构建移出后盒子永不构建。
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+# 同一时间只允许一个发布在跑，且不取消进行中的发布（避免半途切换 release）。
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install deps
+        # dangerouslyAllowAllBuilds：放行 sharp 等原生构建脚本（pnpm 默认拦截，见项目门禁记录）。
+        run: pnpm install --frozen-lockfile --config.dangerouslyAllowAllBuilds=true
+
+      - name: Build shared/api/web
+        # pnpm -r 按拓扑顺序构建（shared -> api/web）；web 启用 output:standalone。
+        run: pnpm -r build
+
+      - name: Compute release name
+        id: meta
+        run: echo "release_name=${GITHUB_SHA::12}-${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+
+      - name: Assemble bundle
+        run: |
+          bash scripts/assemble-bundle.sh "$RUNNER_TEMP/release"
+          tar -czf "${{ steps.meta.outputs.release_name }}.tar.gz" -C "$RUNNER_TEMP/release" .
+
+      - name: Upload artifact (traceability)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.meta.outputs.release_name }}
+          path: ${{ steps.meta.outputs.release_name }}.tar.gz
+          retention-days: 7
+
+      # ---- 以下为投递/激活：仅在配置了部署 Secret 时执行；缺失则优雅跳过（仅产出构建产物）----
+      - name: Gate on deploy secrets
+        id: gate
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          if [ -n "$SSH_KEY" ] && [ -n "$HOST" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::未配置 DEPLOY_SSH_KEY/DEPLOY_HOST，跳过投递（仅构建）。配齐 Secret 后自动启用。"
+          fi
+
+      - name: Prepare remote incoming dir
+        if: steps.gate.outputs.ok == 'true'
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || '22' }}
+          script: mkdir -p /opt/deploy-management/releases/incoming
+
+      - name: Upload release bundle
+        if: steps.gate.outputs.ok == 'true'
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || '22' }}
+          source: ${{ steps.meta.outputs.release_name }}.tar.gz
+          target: /opt/deploy-management/releases/incoming
+
+      - name: Activate release (untar + symlink + health gate + auto-rollback)
+        if: steps.gate.outputs.ok == 'true'
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || '22' }}
+          command_timeout: 15m
+          script: |
+            set -euo pipefail
+            export DEPLOY_ROOT="${DEPLOY_ROOT:-/opt/deploy-management}"
+            NAME="${{ steps.meta.outputs.release_name }}"
+            INCOMING="$DEPLOY_ROOT/releases/incoming"
+            REL="$DEPLOY_ROOT/releases/$NAME"
+            mkdir -p "$REL"
+            tar -xzf "$INCOMING/$NAME.tar.gz" -C "$REL"
+            find "$REL/scripts" -name '*.sh' -exec chmod +x {} + 2>/dev/null || true
+            # activate-release.sh 内部：链 env -> pnpm i --prod -> 切 current -> 重载 -> 健康门 -> 失败自动回滚。
+            bash "$REL/scripts/activate-release.sh" "$REL"
+            rm -f "$INCOMING/$NAME.tar.gz"

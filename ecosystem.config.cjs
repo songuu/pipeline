@@ -16,6 +16,9 @@ module.exports = {
       script: "./scripts/runtime/run-web.sh",
       interpreter: "bash",
       env: { NODE_ENV: "production" },
+      // 护栏：Next16+Node22 standalone 存在 fetch-cache 内存增长（vercel/next.js #85914）。
+      // 1.8GB 盒子内存紧张，超阈值自动重启防 OOM 拖垮控制面。
+      max_memory_restart: "400M",
     },
     {
       name: "dm-tekton-bridge",

@@ -6,6 +6,7 @@ import { AuditModule } from "./audit/audit.module";
 import { CodeReposModule } from "./code-repos/code-repos.module";
 import { EnvironmentsModule } from "./environments/environments.module";
 import { ExecutorsModule } from "./executors/executors.module";
+import { HealthModule } from "./health/health.module";
 import { KubernetesModule } from "./kubernetes/kubernetes.module";
 import { LifecycleModule } from "./lifecycle/lifecycle.module";
 import { MetricsModule } from "./metrics/metrics.module";
@@ -22,6 +23,7 @@ import { VerificationModule } from "./verification/verification.module";
 @Module({
   imports: [
     ExecutorsModule,
+    HealthModule,
     KubernetesModule,
     LifecycleModule,
     MetricsModule,

@@ -68,7 +68,8 @@
       "Bash(ls \"C:\\\\project\\\\company\\\\deploy-management\\\\apps\\\\api\\\\src\\\\verification\")",
       "Bash(ls \"C:\\\\project\\\\company\\\\deploy-management\\\\apps\\\\api\\\\src\\\\metrics\")",
       "Bash(ls \"C:\\\\project\\\\company\\\\deploy-management\\\\apps\\\\api\\\\src\\\\notifications\")",
-      "PowerShell(pnpm *)"
+      "PowerShell(pnpm *)",
+      "WebFetch(domain:kamal-deploy.org)"
     ]
   }
 }

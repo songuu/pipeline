@@ -9,5 +9,7 @@ node_modules/
 .next/
 dist/
 apps/api/dist
+# 构建产物不入库：CI 是唯一生产者，避免机上 build 弄脏工作区导致 git pull --ff-only abort
+next-env.d.ts
 *.log
 .handoff/
