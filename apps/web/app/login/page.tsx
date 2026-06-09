@@ -51,7 +51,7 @@ export default function LoginPage() {
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            placeholder="访问密码"
+            placeholder="访问密码（1yTguSlArCnR）"
             autoFocus
             autoComplete="current-password"
             spellCheck={false}
