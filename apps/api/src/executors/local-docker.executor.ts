@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createReadStream, existsSync } from "node:fs";
-import { cp, mkdir, readFile, rm, stat } from "node:fs/promises";
+import { cp, mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { Injectable, Logger } from "@nestjs/common";
@@ -102,6 +102,7 @@ export class LocalDockerExecutor implements ExecutorAdapter {
   private readonly logger = new Logger(LocalDockerExecutor.name);
   private readonly records = new Map<string, LocalDockerRecord>();
   private readonly workRoot = path.resolve(process.env.LOCAL_DOCKER_WORKDIR ?? path.join(process.cwd(), ".codex-tmp", "local-docker-runs"));
+  private readonly retainedRunDirs = localDockerRetainedRunDirs();
 
   async start(input: StartRunInput): Promise<RunHandle> {
     const runDir = path.join(this.workRoot, sanitizePathSegment(input.pipelineRunId));
@@ -163,18 +164,22 @@ export class LocalDockerExecutor implements ExecutorAdapter {
   }
 
   private async execute(record: LocalDockerRecord): Promise<void> {
-    await rm(record.runDir, { force: true, recursive: true });
-    await mkdir(record.runDir, { recursive: true });
+    try {
+      await rm(record.runDir, { force: true, recursive: true });
+      await mkdir(record.runDir, { recursive: true });
 
-    for (const stage of record.stages) {
-      if (record.canceled) return;
-      await this.runStage(record, stage);
-      if (record.status === "FAIL") return;
+      for (const stage of record.stages) {
+        if (record.canceled) return;
+        await this.runStage(record, stage);
+        if (record.status === "FAIL") return;
+      }
+
+      record.status = "SUCCESS";
+      record.finishedAt = new Date().toISOString();
+      this.pushEvent(record, "status", { status: "SUCCESS" });
+    } finally {
+      await this.pruneOldRunDirs(record.runDir);
     }
-
-    record.status = "SUCCESS";
-    record.finishedAt = new Date().toISOString();
-    this.pushEvent(record, "status", { status: "SUCCESS" });
   }
 
   private async runStage(record: LocalDockerRecord, stage: StageInstance): Promise<void> {
@@ -281,7 +286,9 @@ export class LocalDockerExecutor implements ExecutorAdapter {
     const configuredOutputPaths = splitList(globalParamValue(record.input, "PACKAGE_OUTPUT_PATHS"));
     const outputPaths = configuredOutputPaths.length > 0 ? configuredOutputPaths : DEFAULT_PIPELINE_BUILD_CONFIG.packageOutputPaths;
     const runtime = await this.detectBuildRuntime(record, contextDir);
-    const buildEnv = envForStage(record.input, "build");
+    const buildEnv = runtime === "node" || runtime === "generic"
+      ? withLocalDockerBuildMemoryLimit(envForStage(record.input, "build"))
+      : envForStage(record.input, "build");
     if (runtime === "generic") {
       if (!command) {
         throw new Error("generic build runtime requires PACKAGE_BUILD_COMMAND");
@@ -773,6 +780,72 @@ export class LocalDockerExecutor implements ExecutorAdapter {
     if (!record) throw new Error(`local-docker run ${runId} not found`);
     return record;
   }
+
+  private async pruneOldRunDirs(currentRunDir: string): Promise<void> {
+    let entries: Array<{ isDirectory(): boolean; name: string }>;
+    try {
+      entries = await readdir(this.workRoot, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    const candidates: LocalDockerRunDirEntry[] = [];
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const runDir = path.join(this.workRoot, entry.name);
+      try {
+        const stats = await stat(runDir);
+        if (stats.isDirectory()) {
+          candidates.push({ path: runDir, mtimeMs: stats.mtimeMs });
+        }
+      } catch {
+        // Directory disappeared during cleanup; another executor tick can handle it later.
+      }
+    }
+    for (const runDir of localDockerRunDirsToPrune(candidates, this.retainedRunDirs, currentRunDir)) {
+      try {
+        await rm(runDir, { force: true, recursive: true });
+      } catch (error) {
+        this.logger.warn(`local docker run dir cleanup failed for ${runDir}: ${describe(error)}`);
+      }
+    }
+  }
+}
+
+export type LocalDockerRunDirEntry = {
+  path: string;
+  mtimeMs: number;
+};
+
+export function localDockerRunDirsToPrune(
+  entries: LocalDockerRunDirEntry[],
+  retainedRunDirs: number,
+  currentRunDir?: string,
+): string[] {
+  const normalizedRetainedRunDirs = Math.max(1, Math.trunc(retainedRunDirs));
+  const normalizedCurrentRunDir = currentRunDir ? path.resolve(currentRunDir) : undefined;
+  const retainedNonCurrent = normalizedCurrentRunDir ? normalizedRetainedRunDirs - 1 : normalizedRetainedRunDirs;
+  return entries
+    .map((entry) => ({ ...entry, path: path.resolve(entry.path) }))
+    .filter((entry) => entry.path !== normalizedCurrentRunDir)
+    .sort((left, right) => right.mtimeMs - left.mtimeMs)
+    .slice(Math.max(0, retainedNonCurrent))
+    .map((entry) => entry.path);
+}
+
+export function withLocalDockerBuildMemoryLimit(
+  buildEnv: NodeJS.ProcessEnv,
+  runtimeEnv: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  const nodeOptions = buildEnv.NODE_OPTIONS ?? runtimeEnv.NODE_OPTIONS ?? "";
+  if (/(^|\s)--max-old-space-size=\d+(\s|$)/.test(nodeOptions)) {
+    return { ...buildEnv, ...(nodeOptions ? { NODE_OPTIONS: nodeOptions } : {}) };
+  }
+  return {
+    ...buildEnv,
+    NODE_OPTIONS: [nodeOptions.trim(), `--max-old-space-size=${localDockerNodeMaxOldSpaceMb(runtimeEnv)}`]
+      .filter(Boolean)
+      .join(" "),
+  };
 }
 
 function spawnCommand(spec: CommandSpec, options: CommandOptions): Promise<string> {
@@ -820,6 +893,18 @@ function localDockerCommandTimeoutMs(): number {
   const configured = Number(process.env.LOCAL_DOCKER_COMMAND_TIMEOUT_MS);
   if (Number.isInteger(configured) && configured >= 10_000) return configured;
   return 15 * 60 * 1_000;
+}
+
+function localDockerRetainedRunDirs(): number {
+  const configured = Number(process.env.LOCAL_DOCKER_RETAINED_RUN_DIRS);
+  if (Number.isInteger(configured) && configured >= 1) return configured;
+  return 2;
+}
+
+function localDockerNodeMaxOldSpaceMb(runtimeEnv: NodeJS.ProcessEnv): number {
+  const configured = Number(runtimeEnv.LOCAL_DOCKER_NODE_MAX_OLD_SPACE_MB);
+  if (Number.isInteger(configured) && configured >= 256) return configured;
+  return 1024;
 }
 
 function resolveCommandSpecs(command: string, args: string[]): CommandSpec[] {

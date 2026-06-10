@@ -26,13 +26,13 @@ health_gate() {
   [ "$api_ok" = PASS ] && [ "$web_ok" = PASS ]
 }
 
-# pm2 全量重载整个 ecosystem。
-# WHY 用 startOrReload 整文件：`pm2 reload dm-api dm-web` 多名一行实测只重载第一个；
-# startOrReload <ecosystem> 对文件内所有 app 生效，规避该坑。
+# pm2 激活控制面服务。
+# WHY 用 delete+start：pm2 startOrReload 已存在进程时可能保留旧 release 的 script path / cwd；
+# 重新注册 dm-api/dm-web 可确保每次发布都对齐 current。bridge 保持 stop 待命，不在 local-docker 模式拉起。
 pm2_reload_all() {
   local ecosystem="$1"
-  # && 串联：startOrReload 失败则跳过 save 并返回非0，供调用方据此走自动回滚（见 activate_release）。
-  pm2 startOrReload "$ecosystem" --update-env && pm2 save
+  pm2 delete dm-api dm-web >/dev/null 2>&1 || true
+  pm2 start "$ecosystem" --only dm-api,dm-web --update-env && pm2 save
 }
 
 # 把共享 env 链接进 release（源真值在 $DEPLOY_ROOT/shared/.env，git pull 不覆盖、长期保留）。

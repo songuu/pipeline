@@ -246,7 +246,7 @@ function buildTektonRunRecord(
   const namespace = binding?.namespace ?? `apps-${run.environment}`;
   const pipelineRunName = `${sanitizeKubernetesName(run.pipelineName)}-${run.id.replace("run-", "")}`;
   const status = toYunxiaoRunStatus(run.status);
-  const condition = conditionForStatus(status);
+  const condition = conditionForRunStatus(status, run.executor?.backend);
   const workspaceBindings = binding?.workspaceBindings ?? buildWorkspaceBindings(run.definitionSnapshot, sanitizeKubernetesName(run.pipelineName));
   const params = buildRunParams(run, binding);
   const taskRuns = run.stages.map((stage): TektonRunRecord["taskRuns"][number] => ({
@@ -638,10 +638,16 @@ function buildStepsForStage(stageKey: string, logs: string[], status: JobStatus)
   }));
 }
 
-function conditionForStatus(status: JobStatus): { reason: string; message: string } {
+export function conditionForRunStatus(
+  status: JobStatus,
+  backend?: RunHandle["backend"],
+): { reason: string; message: string } {
   if (status === "SUCCESS") return { reason: "Succeeded", message: "Tasks Completed: all tasks succeeded" };
   if (status === "FAIL") return { reason: "Failed", message: "Tasks Completed: failed task blocks downstream tasks" };
   if (status === "CANCELED") return { reason: "Cancelled", message: "PipelineRun was cancelled by user" };
+  if (status === "QUEUED" && backend === "local-docker") {
+    return { reason: "Pending", message: "PipelineRun is waiting for local-docker executor startup" };
+  }
   if (status === "QUEUED") return { reason: "Pending", message: "PipelineRun is waiting for approval or runner capacity" };
   return { reason: "Started", message: "PipelineRun has been picked up by the controller" };
 }

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PipelineRun, PipelineStageRun, RunHandle, RunStatus } from "@deploy-management/shared";
 import { RunsService } from "./runs.service";
 
@@ -42,7 +42,7 @@ function makeRun(overrides: Partial<PipelineRun> = {}): PipelineRun {
   };
 
   return {
-    id: "run-stale",
+    id: overrides.id ?? "run-stale",
     pipelineId: definitionSnapshot.id,
     pipelineName: definitionSnapshot.name,
     applicationId: definitionSnapshot.applicationId,
@@ -66,17 +66,25 @@ function makeRun(overrides: Partial<PipelineRun> = {}): PipelineRun {
   };
 }
 
-function makeService(run: PipelineRun) {
+function makeService(input: PipelineRun | PipelineRun[]) {
+  const runs = Array.isArray(input) ? input : [input];
   const repo = {
-    list: vi.fn(async () => [run]),
-    snapshot: vi.fn(() => [run]),
-    update: vi.fn(async (_id: string, patch: Partial<PipelineRun>) => Object.assign(run, patch)),
+    list: vi.fn(async () => runs),
+    snapshot: vi.fn(() => runs),
+    update: vi.fn(async (id: string, patch: Partial<PipelineRun>) => {
+      const target = runs.find((run) => run.id === id);
+      if (target) Object.assign(target, patch);
+    }),
   };
   const lifecycle = {
     cancelExecutor: vi.fn(),
     executorEvents: vi.fn(),
+    startExecutor: vi.fn(async (run: PipelineRun) => {
+      run.executor = { runId: run.id, backend: "local-docker" };
+      return run.executor;
+    }),
     executorStatus: vi.fn(async () => ({
-      runId: run.id,
+      runId: runs[0]!.id,
       status: "RUNNING",
       stages: [{ index: 0, name: "source", status: "RUNNING", jobs: [] }],
       startedAt: "2026-06-09T00:00:02.000Z",
@@ -136,5 +144,68 @@ describe("RunsService live-run persistence", () => {
     expect(run.status).toBe("running");
     expect(run.stages[0]!.status).toBe("running");
     expect(repo.update).toHaveBeenCalledWith("run-stale", expect.objectContaining({ status: "running" }));
+  });
+});
+
+describe("RunsService local-docker single-flight gate", () => {
+  const originalExecutor = process.env.EXECUTOR;
+
+  afterEach(() => {
+    process.env.EXECUTOR = originalExecutor;
+    vi.clearAllMocks();
+  });
+
+  it("keeps the second local-docker run queued while one run is active", async () => {
+    process.env.EXECUTOR = "local-docker";
+    const first = makeRun({ id: "run-first" });
+    const second = makeRun({ id: "run-second" });
+    const { lifecycle, repo, service } = makeService([first, second]);
+
+    (service as unknown as { scheduleRealtimeRun(run: PipelineRun): void }).scheduleRealtimeRun(first);
+    (service as unknown as { scheduleRealtimeRun(run: PipelineRun): void }).scheduleRealtimeRun(second);
+    await Promise.resolve();
+
+    expect(lifecycle.startExecutor).toHaveBeenCalledTimes(1);
+    expect(lifecycle.startExecutor).toHaveBeenCalledWith(first);
+    expect(second.status).toBe("queued");
+    expect(second.stages[0]!.logs.join("\n")).toContain("等待本机单飞闸");
+    expect(repo.update).toHaveBeenCalledWith("run-second", expect.objectContaining({ status: "queued" }));
+  });
+
+  it("starts the next queued local-docker run after the active run releases the slot", async () => {
+    process.env.EXECUTOR = "local-docker";
+    const first = makeRun({ id: "run-first" });
+    const second = makeRun({ id: "run-second" });
+    const { lifecycle, service } = makeService([first, second]);
+
+    (service as unknown as { scheduleRealtimeRun(run: PipelineRun): void }).scheduleRealtimeRun(first);
+    (service as unknown as { scheduleRealtimeRun(run: PipelineRun): void }).scheduleRealtimeRun(second);
+    await Promise.resolve();
+
+    await (service as unknown as { releaseLocalDockerSlot(runId: string): Promise<void> }).releaseLocalDockerSlot(first.id);
+    await Promise.resolve();
+
+    expect(lifecycle.startExecutor).toHaveBeenCalledTimes(2);
+    expect(lifecycle.startExecutor).toHaveBeenNthCalledWith(2, second);
+  });
+
+  it("skips terminal queued local-docker runs when releasing the slot", async () => {
+    process.env.EXECUTOR = "local-docker";
+    const first = makeRun({ id: "run-first" });
+    const canceled = makeRun({ id: "run-canceled", status: "canceled" });
+    const third = makeRun({ id: "run-third" });
+    const { lifecycle, service } = makeService([first, canceled, third]);
+
+    (service as unknown as { scheduleRealtimeRun(run: PipelineRun): void }).scheduleRealtimeRun(first);
+    (service as unknown as { scheduleRealtimeRun(run: PipelineRun): void }).scheduleRealtimeRun(canceled);
+    (service as unknown as { scheduleRealtimeRun(run: PipelineRun): void }).scheduleRealtimeRun(third);
+    await Promise.resolve();
+    canceled.status = "canceled";
+
+    await (service as unknown as { releaseLocalDockerSlot(runId: string): Promise<void> }).releaseLocalDockerSlot(first.id);
+    await Promise.resolve();
+
+    expect(lifecycle.startExecutor).toHaveBeenCalledTimes(2);
+    expect(lifecycle.startExecutor).toHaveBeenNthCalledWith(2, third);
   });
 });

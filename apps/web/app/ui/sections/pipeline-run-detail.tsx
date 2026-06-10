@@ -52,6 +52,8 @@ type InspectableDetail = {
   lines?: string[];
 };
 
+type ExecutorBackend = NonNullable<PipelineRun["executor"]>["backend"];
+
 export function PipelineRunDetail({
   snapshot,
   run,
@@ -170,14 +172,7 @@ export function PipelineRunDetail({
     selectedStage;
   const variableCount =
     (run.definitionSnapshot.variables?.length ?? 0) + (run.definitionSnapshot.runtimeVariables?.length ?? 0);
-  const runStateNote: Record<PipelineRun["status"], string> = {
-    queued: "等待执行器分配资源",
-    running: "控制面正在执行任务",
-    waiting_approval: "灰度完成，等待审批",
-    success: "全部任务已完成",
-    failed: "失败任务阻断后续阶段",
-    canceled: "已由用户取消，后续任务跳过",
-  };
+  const runStateNote = runStateNoteFor(run, executorBackend);
 
   useEffect(() => {
     if (!activeStage || !["queued", "running", "waiting_approval"].includes(run.status)) return;
@@ -386,7 +381,7 @@ export function PipelineRunDetail({
             <div>
               <strong>#{run.id.replace("run-", "")}</strong>
               <StatusBadge status={run.status} />
-              <em>{runStateNote[run.status]}</em>
+              <em>{runStateNote}</em>
             </div>
             <div className="run-live-progress" aria-label={`流水线执行进度 ${run.progress}%`}>
               <span>
@@ -1987,7 +1982,7 @@ function RunHistoryPanel({
               </div>
               <div className="run-history-result">
                 <span>{activeStage ? `${activeStage.title} · ${historyStageLabel(activeStage.status)}` : "等待调度"}</span>
-                <strong>{failedStage ? stageErrorLine(failedStage) : historyRunResult(item.status)}</strong>
+                <strong>{failedStage ? stageErrorLine(failedStage) : historyRunResult(item)}</strong>
               </div>
             </button>
           );
@@ -2007,16 +2002,44 @@ function formatRunDuration(run: PipelineRun): string {
   return run.status === "queued" ? "等待中" : `${Math.max(1, Math.round(run.progress / 8))}秒`;
 }
 
-function historyRunResult(status: PipelineRun["status"]): string {
+function historyRunResult(run: PipelineRun): string {
+  if (run.status === "queued") return runStateNoteFor(run, run.executor?.backend);
   const labels: Record<PipelineRun["status"], string> = {
-    queued: "等待执行器分配资源",
+    queued: "等待执行器启动",
     running: "正在执行",
     waiting_approval: "等待审批继续发布",
     success: "全部阶段执行成功",
     failed: "失败阶段阻断后续任务",
     canceled: "运行已取消",
   };
-  return labels[status];
+  return labels[run.status];
+}
+
+export function runStateNoteFor(run: PipelineRun, executorBackend: ExecutorBackend | undefined = run.executor?.backend): string {
+  if (run.status === "queued" && executorBackend === "local-docker") {
+    return hasLocalDockerSingleFlightGate(run)
+      ? "等待本机单飞闸释放"
+      : "等待 local-docker 执行器启动";
+  }
+  if (run.status === "queued" && executorBackend === "tekton") {
+    return "等待审批或 Runner 容量";
+  }
+  const labels: Record<PipelineRun["status"], string> = {
+    queued: "等待执行器启动",
+    running: "控制面正在执行任务",
+    waiting_approval: "灰度完成，等待审批",
+    success: "全部任务已完成",
+    failed: "失败任务阻断后续阶段",
+    canceled: "已由用户取消，后续任务跳过",
+  };
+  return labels[run.status];
+}
+
+function hasLocalDockerSingleFlightGate(run: PipelineRun): boolean {
+  return run.stages.some((stage) =>
+    stage.metadata.localDockerGate === "waiting" ||
+    stage.logs.some((line) => line.includes("等待本机单飞闸")),
+  );
 }
 
 function stageErrorLine(stage: PipelineRun["stages"][number]): string {

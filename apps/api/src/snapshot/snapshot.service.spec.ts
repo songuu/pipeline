@@ -7,7 +7,12 @@ import type {
   PipelineDefinition,
   TektonWorkspaceBinding,
 } from "@deploy-management/shared";
-import { DEFAULT_STAGE_DAG, buildTaskGraph, resolveStageRunAfter } from "./snapshot.service";
+import {
+  DEFAULT_STAGE_DAG,
+  buildTaskGraph,
+  conditionForRunStatus,
+  resolveStageRunAfter,
+} from "./snapshot.service";
 
 const TEKTON_GO_PATH = resolve(__dirname, "../../../../services/tekton-bridge/internal/backend/tekton.go");
 
@@ -143,5 +148,25 @@ describe("buildTaskGraph DAG semantics", () => {
       const goDeps = [...goDag[stage]].sort();
       expect(goDeps, `stage ${stage} dependency mismatch`).toEqual(tsDeps);
     }
+  });
+});
+
+describe("conditionForRunStatus", () => {
+  it("uses local-docker queued wording instead of approval or runner capacity", () => {
+    const condition = conditionForRunStatus("QUEUED", "local-docker");
+
+    expect(condition).toEqual({
+      reason: "Pending",
+      message: "PipelineRun is waiting for local-docker executor startup",
+    });
+    expect(condition.message).not.toContain("approval");
+    expect(condition.message).not.toContain("runner capacity");
+  });
+
+  it("keeps generic queued wording for tekton", () => {
+    expect(conditionForRunStatus("QUEUED", "tekton")).toEqual({
+      reason: "Pending",
+      message: "PipelineRun is waiting for approval or runner capacity",
+    });
   });
 });

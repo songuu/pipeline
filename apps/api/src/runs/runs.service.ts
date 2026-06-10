@@ -33,6 +33,8 @@ import type { TriggerRunDto } from "./dto/trigger-run.dto";
 export class RunsService implements OnModuleInit {
   private readonly liveTimers = new Map<string, Array<ReturnType<typeof setTimeout>>>();
   private readonly runHandles = new Map<string, RunHandle>();
+  private readonly localDockerQueue: PipelineRun[] = [];
+  private activeLocalDockerRunId: string | undefined;
 
   constructor(
     @Inject(RunsRepository) private readonly repo: RunsRepository,
@@ -191,6 +193,7 @@ export class RunsService implements OnModuleInit {
     }
     this.lifecycle.cancel(run);
     await this.persistRun(run);
+    await this.releaseLocalDockerSlot(run.id);
     await this.audit.record(run.actor, "cancel_run", run.id);
     return run;
   }
@@ -419,6 +422,24 @@ export class RunsService implements OnModuleInit {
 
   private scheduleRealtimeRun(run: PipelineRun): void {
     this.clearRunTimers(run.id);
+    if (this.usesLocalDockerSingleFlight()) {
+      void this.enqueueLocalDockerRun(run);
+      return;
+    }
+    void this.startRealtimeExecutorRun(run);
+  }
+
+  private async enqueueLocalDockerRun(run: PipelineRun): Promise<void> {
+    if (this.activeLocalDockerRunId && this.activeLocalDockerRunId !== run.id) {
+      this.markWaitingForLocalDockerSlot(run);
+      if (!this.localDockerQueue.some((item) => item.id === run.id)) {
+        this.localDockerQueue.push(run);
+      }
+      await this.persistRun(run);
+      return;
+    }
+
+    this.activeLocalDockerRunId = run.id;
     void this.startRealtimeExecutorRun(run);
   }
 
@@ -440,7 +461,10 @@ export class RunsService implements OnModuleInit {
   }
 
   private async syncExecutorRun(run: PipelineRun, handle: RunHandle): Promise<void> {
-    if (this.isTerminal(run)) return;
+    if (this.isTerminal(run)) {
+      await this.releaseLocalDockerSlot(run.id);
+      return;
+    }
     try {
       const status = await this.lifecycle.executorStatus(handle);
       await this.runEvents.recordStatusSnapshot(handle, status);
@@ -452,6 +476,7 @@ export class RunsService implements OnModuleInit {
         await this.artifacts.upsertFromRun(run);
         await this.ensureApproval(run);
         this.clearRunTimers(run.id);
+        await this.releaseLocalDockerSlot(run.id);
         return;
       }
 
@@ -459,11 +484,13 @@ export class RunsService implements OnModuleInit {
         await this.artifacts.upsertFromRun(run);
         await this.artifacts.upsertFromRun(run, "provenance");
         this.clearRunTimers(run.id);
+        await this.releaseLocalDockerSlot(run.id);
         return;
       }
 
       if (this.isTerminal(run)) {
         this.clearRunTimers(run.id);
+        await this.releaseLocalDockerSlot(run.id);
         return;
       }
     } catch (error) {
@@ -519,6 +546,7 @@ export class RunsService implements OnModuleInit {
     }
     this.clearRunTimers(run.id);
     await this.persistRun(run);
+    await this.releaseLocalDockerSlot(run.id);
   }
 
   private isTerminal(run: PipelineRun): boolean {
@@ -537,6 +565,38 @@ export class RunsService implements OnModuleInit {
 
   private async persistRun(run: PipelineRun): Promise<void> {
     await this.repo.update(run.id, run);
+  }
+
+  private usesLocalDockerSingleFlight(): boolean {
+    return process.env.EXECUTOR === "local-docker";
+  }
+
+  private markWaitingForLocalDockerSlot(run: PipelineRun): void {
+    const stage = run.stages.find((item) => item.status === "pending") ?? run.stages[0];
+    const message = "等待本机单飞闸：当前已有 local-docker run 在执行，释放后将自动启动。";
+    if (stage && !stage.logs.includes(message)) {
+      stage.logs = [...stage.logs, message];
+      stage.metadata = {
+        ...stage.metadata,
+        localDockerGate: "waiting",
+      };
+    }
+    run.status = "queued";
+    run.updatedAt = new Date().toISOString();
+  }
+
+  private async releaseLocalDockerSlot(runId: string): Promise<void> {
+    if (this.activeLocalDockerRunId !== runId) return;
+
+    this.activeLocalDockerRunId = undefined;
+    let nextRun = this.localDockerQueue.shift();
+    while (nextRun && this.isTerminal(nextRun)) {
+      nextRun = this.localDockerQueue.shift();
+    }
+    if (!nextRun) return;
+
+    this.activeLocalDockerRunId = nextRun.id;
+    void this.startRealtimeExecutorRun(nextRun);
   }
 }
 
